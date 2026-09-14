@@ -1,0 +1,702 @@
+/* ═══════════════════════════════════════════════════════════════
+   PrintCam — app.js
+   Gestisce login page e dashboard dinamica con CRUD & Drag & Drop
+   ═══════════════════════════════════════════════════════════════ */
+
+document.addEventListener('DOMContentLoaded', () => {
+  if (document.getElementById('loginForm')) {
+    initLoginPage();
+  } else if (document.getElementById('dashboard')) {
+    initDashboard();
+  }
+});
+
+/* ══════════════════════════════════════════════════════════════
+   LOGIN PAGE
+   ══════════════════════════════════════════════════════════════ */
+
+function initLoginPage() {
+  const form       = document.getElementById('loginForm');
+  const usernameEl = document.getElementById('username');
+  const passwordEl = document.getElementById('password');
+  const loginBtn   = document.getElementById('loginBtn');
+  const errorMsg   = document.getElementById('errorMsg');
+  const errorText  = document.getElementById('errorText');
+  const togglePwd  = document.getElementById('togglePwd');
+  const eyeOpen    = document.getElementById('eyeOpen');
+  const eyeClosed  = document.getElementById('eyeClosed');
+
+  usernameEl.focus();
+
+  togglePwd.addEventListener('click', () => {
+    const isHidden = passwordEl.type === 'password';
+    passwordEl.type = isHidden ? 'text' : 'password';
+    eyeOpen.style.display   = isHidden ? 'none' : 'block';
+    eyeClosed.style.display = isHidden ? 'block' : 'none';
+    passwordEl.focus();
+  });
+
+  [usernameEl, passwordEl].forEach(el => {
+    el.addEventListener('input', () => hideError());
+  });
+
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    hideError();
+
+    const username = usernameEl.value.trim();
+    const password = passwordEl.value;
+
+    if (!username || !password) {
+      showError('Inserisci username e password');
+      return;
+    }
+
+    setLoading(true);
+
+    try {
+      const res = await fetch('/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, password }),
+      });
+
+      const data = await res.json();
+
+      if (res.ok && data.success) {
+        loginBtn.textContent = '✓';
+        loginBtn.style.background = 'linear-gradient(135deg, #059669, #10b981)';
+        loginBtn.style.boxShadow  = '0 4px 20px rgba(16, 185, 129, 0.5)';
+        setTimeout(() => { window.location.href = '/dashboard'; }, 400);
+      } else {
+        setLoading(false);
+        showError(data.message || 'Credenziali non valide');
+        passwordEl.value = '';
+        passwordEl.focus();
+        const card = document.querySelector('.login-card');
+        card.style.animation = 'none';
+        card.offsetHeight;
+        card.style.animation = 'shake 0.4s ease';
+      }
+    } catch (err) {
+      setLoading(false);
+      showError('Errore di rete. Riprova.');
+    }
+  });
+
+  function setLoading(loading) {
+    loginBtn.disabled = loading;
+    loginBtn.classList.toggle('loading', loading);
+    if (loading) {
+      loginBtn.querySelector('.btn-text').textContent = 'Accesso...';
+    } else {
+      loginBtn.querySelector('.btn-text').textContent = 'Accedi';
+    }
+  }
+
+  function showError(msg) {
+    errorText.textContent = msg;
+    errorMsg.classList.add('visible');
+  }
+
+  function hideError() {
+    errorMsg.classList.remove('visible');
+  }
+}
+
+// Shake animation
+(function addShakeAnimation() {
+  if (document.getElementById('shakeStyle')) return;
+  const style = document.createElement('style');
+  style.id = 'shakeStyle';
+  style.textContent = `
+    @keyframes shake {
+      0%, 100% { transform: translateX(0); }
+      20%       { transform: translateX(-8px); }
+      40%       { transform: translateX(8px); }
+      60%       { transform: translateX(-5px); }
+      80%       { transform: translateX(5px); }
+    }
+  `;
+  document.head.appendChild(style);
+})();
+
+
+/* ══════════════════════════════════════════════════════════════
+   DASHBOARD DINAMICA
+   ══════════════════════════════════════════════════════════════ */
+
+let activeCameraCleanups = {};
+let isReorderMode = false;
+let currentCameras = [];
+
+function initDashboard() {
+  // ── Orologio ──────────────────────────────────────────────
+  const clockEl = document.getElementById('clock');
+  function updateClock() {
+    const now = new Date();
+    clockEl.textContent = now.toLocaleString('it-IT', {
+      weekday: 'short',
+      day: '2-digit', month: '2-digit', year: 'numeric',
+      hour: '2-digit', minute: '2-digit', second: '2-digit',
+    });
+  }
+  updateClock();
+  setInterval(updateClock, 1000);
+
+  // ── Controllo stato go2rtc ─────────────────────────────────
+  const statusDot  = document.getElementById('statusDot');
+  const statusText = document.getElementById('statusText');
+
+  async function checkServerStatus() {
+    try {
+      const res = await fetch('/api/status', { signal: AbortSignal.timeout(5000) });
+      const data = await res.json();
+      if (data.online) {
+        statusDot.className = 'status-dot online';
+        statusText.textContent = 'Online';
+      } else {
+        statusDot.className = 'status-dot offline';
+        statusText.textContent = 'Offline';
+      }
+    } catch {
+      statusDot.className = 'status-dot offline';
+      statusText.textContent = 'Offline';
+    }
+  }
+
+  checkServerStatus();
+  setInterval(checkServerStatus, 30000);
+
+  // ── Event Handlers Header & Modal ─────────────────────────
+  document.getElementById('btnAddCamera').addEventListener('click', () => {
+    openCameraModal();
+  });
+
+  const reorderBtn = document.getElementById('btnToggleReorder');
+  const reorderText = document.getElementById('reorderText');
+  reorderBtn.addEventListener('click', () => {
+    isReorderMode = !isReorderMode;
+    document.getElementById('dashboard').classList.toggle('reordering', isReorderMode);
+    reorderBtn.classList.toggle('active', isReorderMode);
+    reorderText.textContent = isReorderMode ? 'Fatto' : 'Riordina';
+  });
+
+  setupModalEvents();
+
+  // ── Caricamento Camere ─────────────────────────────────────
+  loadAndRenderCameras();
+
+  // ESC da fullscreen
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && document.fullscreenElement) {
+      document.exitFullscreen();
+    }
+  });
+}
+
+// ─── Caricamento e Rendering delle Camere ──────────────────────────────────────
+
+async function loadAndRenderCameras() {
+  try {
+    const res = await fetch('/api/cameras');
+    const data = await res.json();
+    if (data.success) {
+      currentCameras = data.cameras;
+      renderCameras(currentCameras);
+    }
+  } catch (err) {
+    console.error('Errore caricamento fotocamere:', err);
+  }
+}
+
+function renderCameras(cameras) {
+  const container = document.getElementById('dashboard');
+
+  // Pulisci cleanup timer esistenti
+  Object.keys(activeCameraCleanups).forEach(id => {
+    if (activeCameraCleanups[id]) activeCameraCleanups[id]();
+  });
+  activeCameraCleanups = {};
+
+  container.innerHTML = '';
+
+  if (cameras.length === 0) {
+    container.innerHTML = `
+      <div style="grid-column: 1 / -1; text-align: center; padding: 60px 20px; color: var(--text-secondary);">
+        <p style="font-size: 18px; margin-bottom: 12px;">Nessuna telecamera configurata.</p>
+        <p style="font-size: 14px;">Clicca su <strong>+ Nuova Camera</strong> in alto per aggiungerne una!</p>
+      </div>
+    `;
+    return;
+  }
+
+  cameras.forEach((cam, idx) => {
+    const card = document.createElement('section');
+    card.className = `camera-card cam-${idx + 1}`;
+    card.id = `card-${cam.id}`;
+    card.setAttribute('data-id', cam.id);
+    card.setAttribute('aria-label', `Camera ${idx + 1} - ${cam.name}`);
+    card.draggable = true;
+
+    const fitClass = `fit-${cam.fitMode || 'contain'}`;
+    const displayModeText = cam.mode === 'ffmpeg-mjpeg' ? 'FFmpeg MJPEG' : 'MJPEG Direct';
+
+    card.innerHTML = `
+      <div class="camera-badge">CAM ${idx + 1}</div>
+
+      <div class="card-controls">
+        <button class="btn-card-action btn-move-left" title="Sposta a sinistra" aria-label="Sposta indietro">◀</button>
+        <button class="btn-card-action btn-move-right" title="Sposta a destra" aria-label="Sposta avanti">▶</button>
+
+        <button class="btn-card-action drag-handle" title="Trascina per riordinare" aria-label="Riordina camera">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="9" cy="5" r="1"/><circle cx="9" cy="12" r="1"/><circle cx="9" cy="19" r="1"/>
+            <circle cx="15" cy="5" r="1"/><circle cx="15" cy="12" r="1"/><circle cx="15" cy="19" r="1"/>
+          </svg>
+        </button>
+
+        <button class="btn-card-action btn-edit-cam" title="Modifica impostazioni" aria-label="Modifica camera">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 20h9"></path>
+            <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path>
+          </svg>
+        </button>
+
+        <button class="btn-card-action btn-fs-cam" title="Schermo intero" aria-label="Schermo intero camera">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/>
+          </svg>
+        </button>
+      </div>
+
+      <div class="camera-feed" id="feed-${cam.id}">
+
+        <div class="loading-overlay" id="loading-${cam.id}">
+          <div class="loader-ring"></div>
+          <p>Connessione a ${cam.name}...</p>
+        </div>
+
+        <div class="error-overlay" id="error-${cam.id}" role="alert">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M22.54 6.42a2.78 2.78 0 0 0-1.95-1.95C18.88 4 12 4 12 4s-6.88 0-8.59.46a2.78 2.78 0 0 0-1.95 1.96C1 8.12 1 12 1 12s0 3.88.46 5.58a2.78 2.78 0 0 0 1.95 1.95C5.12 20 12 20 12 20s6.88 0 8.59-.47a2.78 2.78 0 0 0 1.95-1.95C23 15.88 23 12 23 12s0-3.88-.46-5.58z"/>
+            <line x1="1" y1="1" x2="23" y2="23"/>
+          </svg>
+          <p>
+            <strong>Camera non disponibile</strong>
+            Verifica l'URL o che la camera sia accesa.
+          </p>
+          <button class="btn-retry" id="retry-${cam.id}">↺ Riprova</button>
+        </div>
+
+        <img id="img-${cam.id}" class="camera-img" alt="${cam.name}" draggable="false" />
+        <canvas id="canvas-${cam.id}" class="camera-canvas ${fitClass}" aria-hidden="true"></canvas>
+
+      </div>
+
+      <div class="camera-overlay">
+        <div class="camera-info">
+          <span class="camera-name">${cam.name}</span>
+          <span class="camera-url">${displayModeText}</span>
+        </div>
+        <div class="live-badge" id="live-${cam.id}">
+          <div class="live-dot"></div>
+          LIVE
+        </div>
+      </div>
+    `;
+
+    container.appendChild(card);
+
+    // Event listener Sposta a sinistra ◀
+    card.querySelector('.btn-move-left').addEventListener('click', (e) => {
+      e.stopPropagation();
+      const prev = card.previousElementSibling;
+      if (prev && prev.classList.contains('camera-card')) {
+        container.insertBefore(card, prev);
+        updateBadgeNumbers();
+        saveNewOrder();
+      }
+    });
+
+    // Event listener Sposta a destra ▶
+    card.querySelector('.btn-move-right').addEventListener('click', (e) => {
+      e.stopPropagation();
+      const next = card.nextElementSibling;
+      if (next && next.classList.contains('camera-card')) {
+        container.insertBefore(next, card);
+        updateBadgeNumbers();
+        saveNewOrder();
+      }
+    });
+
+    // Event listener Modifica
+    card.querySelector('.btn-edit-cam').addEventListener('click', (e) => {
+      e.stopPropagation();
+      openCameraModal(cam);
+    });
+
+    // Event listener Fullscreen
+    card.querySelector('.btn-fs-cam').addEventListener('click', (e) => {
+      e.stopPropagation();
+      toggleFullscreen(card);
+    });
+
+    // Inizializza lo stream video
+    activeCameraCleanups[cam.id] = setupCamera(cam.id);
+  });
+
+  setupDragAndDrop();
+}
+
+// ─── Stream Video & Freeze Frame Logic ────────────────────────────────────────
+
+function setupCamera(id) {
+  const img        = document.getElementById(`img-${id}`);
+  const canvas     = document.getElementById(`canvas-${id}`);
+  if (!img || !canvas) return () => {};
+
+  const ctx        = canvas.getContext('2d');
+  const loadingEl  = document.getElementById(`loading-${id}`);
+  const errorEl    = document.getElementById(`error-${id}`);
+  const liveBadge  = document.getElementById(`live-${id}`);
+  const retryBtn   = document.getElementById(`retry-${id}`);
+
+  let retryTimer     = null;
+  let drawTimer      = null;
+  let failCount      = 0;
+  let hasFirstFrame  = false;
+  const MAX_SILENT   = 2;
+  const SILENT_DELAY = 1500;
+  const OVERLAY_DELAY= 5000;
+
+  function startDrawing() {
+    if (drawTimer) return;
+    drawTimer = setInterval(() => {
+      if (img.naturalWidth > 0 && img.naturalHeight > 0) {
+        if (canvas.width !== img.naturalWidth) {
+          canvas.width  = img.naturalWidth;
+          canvas.height = img.naturalHeight;
+        }
+        try {
+          ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+          hasFirstFrame = true;
+        } catch (_) {}
+      }
+    }, 33);
+  }
+
+  function stopDrawing() {
+    if (drawTimer) {
+      clearInterval(drawTimer);
+      drawTimer = null;
+    }
+  }
+
+  function loadStream(silent = false) {
+    clearTimeout(retryTimer);
+    if (!silent) {
+      if (!hasFirstFrame) {
+        loadingEl.classList.remove('hidden');
+      }
+      errorEl.classList.remove('visible');
+      liveBadge.classList.remove('offline');
+    }
+    const streamUrl = `/stream/${id}?t=${Date.now()}`;
+    img.src = '';
+    setTimeout(() => { img.src = streamUrl; }, 50);
+  }
+
+  const onLoad = () => {
+    failCount = 0;
+    loadingEl.classList.add('hidden');
+    errorEl.classList.remove('visible');
+    liveBadge.classList.remove('offline');
+    startDrawing();
+  };
+
+  const onError = () => {
+    stopDrawing();
+    loadingEl.classList.add('hidden');
+    failCount++;
+
+    if (failCount <= MAX_SILENT) {
+      retryTimer = setTimeout(() => loadStream(true), SILENT_DELAY);
+    } else {
+      liveBadge.classList.add('offline');
+      if (!hasFirstFrame) {
+        errorEl.classList.add('visible');
+      }
+      retryTimer = setTimeout(() => loadStream(true), OVERLAY_DELAY);
+    }
+  };
+
+  const onRetryClick = () => {
+    failCount = 0;
+    hasFirstFrame = false;
+    loadStream(false);
+  };
+
+  img.addEventListener('load', onLoad);
+  img.addEventListener('error', onError);
+  if (retryBtn) retryBtn.addEventListener('click', onRetryClick);
+
+  loadStream(false);
+
+  // Restituisce funzione di cleanup per rimuovere timer quando si re-renderizza
+  return () => {
+    clearTimeout(retryTimer);
+    stopDrawing();
+    img.removeEventListener('load', onLoad);
+    img.removeEventListener('error', onError);
+    img.src = '';
+  };
+}
+
+// ─── Gestione Modal Aggiungi / Modifica Camera ───────────────────────────────
+
+function setupModalEvents() {
+  const modal = document.getElementById('cameraModal');
+  const form = document.getElementById('cameraForm');
+  const btnClose = document.getElementById('btnCloseModal');
+  const btnCancel = document.getElementById('btnCancelModal');
+  const btnDelete = document.getElementById('btnDeleteCamera');
+
+  [btnClose, btnCancel].forEach(btn => {
+    btn.addEventListener('click', closeCameraModal);
+  });
+
+  modal.addEventListener('click', (e) => {
+    if (e.target === modal) closeCameraModal();
+  });
+
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const id = document.getElementById('camId').value;
+    const name = document.getElementById('camName').value;
+    const url = document.getElementById('camUrl').value;
+    const mode = document.getElementById('camMode').value;
+    const fitMode = document.getElementById('camFitMode').value;
+
+    const payload = { name, url, mode, fitMode };
+
+    try {
+      let res;
+      if (id) {
+        res = await fetch(`/api/cameras/${id}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+      } else {
+        res = await fetch('/api/cameras', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+      }
+
+      const data = await res.json();
+      if (data.success) {
+        closeCameraModal();
+        await loadAndRenderCameras();
+      } else {
+        alert(data.message || 'Errore durante il salvataggio');
+      }
+    } catch (err) {
+      alert('Errore di connessione al server');
+    }
+  });
+
+  btnDelete.addEventListener('click', async () => {
+    const id = document.getElementById('camId').value;
+    if (!id) return;
+    if (!confirm('Sei sicuro di voler eliminare questa telecamera?')) return;
+
+    try {
+      const res = await fetch(`/api/cameras/${id}`, { method: 'DELETE' });
+      const data = await res.json();
+      if (data.success) {
+        closeCameraModal();
+        await loadAndRenderCameras();
+      } else {
+        alert(data.message || 'Errore durante l\'eliminazione');
+      }
+    } catch (err) {
+      alert('Errore di connessione al server');
+    }
+  });
+}
+
+function openCameraModal(cam = null) {
+  const modal = document.getElementById('cameraModal');
+  const title = document.getElementById('modalTitle');
+  const btnDelete = document.getElementById('btnDeleteCamera');
+
+  if (cam) {
+    title.textContent = 'Modifica Camera';
+    document.getElementById('camId').value = cam.id;
+    document.getElementById('camName').value = cam.name;
+    document.getElementById('camUrl').value = cam.url;
+    document.getElementById('camMode').value = cam.mode || 'ffmpeg-mjpeg';
+    document.getElementById('camFitMode').value = cam.fitMode || 'contain';
+    btnDelete.style.display = 'block';
+  } else {
+    title.textContent = 'Aggiungi Nuova Camera';
+    document.getElementById('camId').value = '';
+    document.getElementById('camName').value = '';
+    document.getElementById('camUrl').value = '';
+    document.getElementById('camMode').value = 'ffmpeg-mjpeg';
+    document.getElementById('camFitMode').value = 'contain';
+    btnDelete.style.display = 'none';
+  }
+
+  modal.classList.add('active');
+}
+
+function closeCameraModal() {
+  document.getElementById('cameraModal').classList.remove('active');
+}
+
+// ─── Drag & Drop & Reordering ────────────────────────────────────────────────
+
+function updateBadgeNumbers() {
+  const cards = document.querySelectorAll('.camera-card');
+  cards.forEach((card, idx) => {
+    const badge = card.querySelector('.camera-badge');
+    if (badge) badge.textContent = `CAM ${idx + 1}`;
+  });
+}
+
+function setupDragAndDrop() {
+  const container = document.getElementById('dashboard');
+  const cards = Array.from(container.querySelectorAll('.camera-card'));
+
+  cards.forEach(card => {
+    const handle = card.querySelector('.drag-handle');
+    let isDragging = false;
+
+    // Supporto Pointer / Touch per smartphone, tablet e mouse
+    if (handle) {
+      handle.addEventListener('pointerdown', (e) => {
+        if (!isReorderMode) return;
+        isDragging = true;
+        card.classList.add('dragging');
+        try { handle.setPointerCapture(e.pointerId); } catch (_) {}
+      });
+
+      handle.addEventListener('pointermove', (e) => {
+        if (!isDragging || !isReorderMode) return;
+        e.preventDefault();
+
+        const elementBelow = document.elementFromPoint(e.clientX, e.clientY);
+        if (!elementBelow) return;
+
+        const targetCard = elementBelow.closest('.camera-card');
+        if (targetCard && targetCard !== card && container.contains(targetCard)) {
+          const targetRect = targetCard.getBoundingClientRect();
+          const isVert = window.innerWidth <= 800;
+          const offset = isVert ? (e.clientY - targetRect.top - targetRect.height / 2) : (e.clientX - targetRect.left - targetRect.width / 2);
+
+          if (offset < 0) {
+            container.insertBefore(card, targetCard);
+          } else {
+            container.insertBefore(card, targetCard.nextSibling);
+          }
+          updateBadgeNumbers();
+        }
+      });
+
+      const onPointerEnd = (e) => {
+        if (!isDragging) return;
+        isDragging = false;
+        card.classList.remove('dragging');
+        try { handle.releasePointerCapture(e.pointerId); } catch (_) {}
+        updateBadgeNumbers();
+        saveNewOrder();
+      };
+
+      handle.addEventListener('pointerup', onPointerEnd);
+      handle.addEventListener('pointercancel', onPointerEnd);
+    }
+
+    // HTML5 Drag & Drop fallback per desktop
+    card.setAttribute('draggable', 'true');
+
+    card.addEventListener('dragstart', (e) => {
+      if (!isReorderMode) {
+        e.preventDefault();
+        return;
+      }
+      card.classList.add('dragging');
+      e.dataTransfer.effectAllowed = 'move';
+      e.dataTransfer.setData('text/plain', card.getAttribute('data-id'));
+    });
+
+    card.addEventListener('dragend', () => {
+      card.classList.remove('dragging');
+      cards.forEach(c => c.classList.remove('drag-over'));
+      updateBadgeNumbers();
+      saveNewOrder();
+    });
+
+    card.addEventListener('dragover', (e) => {
+      if (!isReorderMode) return;
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'move';
+      card.classList.add('drag-over');
+    });
+
+    card.addEventListener('dragleave', () => {
+      card.classList.remove('drag-over');
+    });
+
+    card.addEventListener('drop', (e) => {
+      if (!isReorderMode) return;
+      e.preventDefault();
+      card.classList.remove('drag-over');
+
+      const draggedId = e.dataTransfer.getData('text/plain');
+      const draggedEl = document.querySelector(`.camera-card[data-id="${draggedId}"]`);
+      if (draggedEl && draggedEl !== card) {
+        const bounding = card.getBoundingClientRect();
+        const offset = e.clientX - bounding.left - (bounding.width / 2);
+        if (offset < 0) {
+          container.insertBefore(draggedEl, card);
+        } else {
+          container.insertBefore(draggedEl, card.nextSibling);
+        }
+        updateBadgeNumbers();
+      }
+    });
+  });
+}
+
+async function saveNewOrder() {
+  const container = document.getElementById('dashboard');
+  const cards = container.querySelectorAll('.camera-card');
+  const order = Array.from(cards).map(card => card.getAttribute('data-id'));
+
+  try {
+    await fetch('/api/cameras/reorder', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ order }),
+    });
+  } catch (err) {
+    console.error('Errore salvataggio ordine:', err);
+  }
+}
+
+
+// ─── Fullscreen Helper ────────────────────────────────────────────────────────
+
+function toggleFullscreen(el) {
+  if (!document.fullscreenElement) {
+    el.requestFullscreen({ navigationUI: 'hide' }).catch((err) => {
+      console.warn('Fullscreen non supportato:', err.message);
+    });
+  } else {
+    document.exitFullscreen();
+  }
+}

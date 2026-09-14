@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="description" content="PrintCam — Dashboard monitoraggio stampante 3D" />
+  <meta name="robots" content="noindex, nofollow" />
+  <title>PrintCam — Dashboard</title>
+  <link rel="stylesheet" href="style.css" />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🖨️</text></svg>" />
+</head>
+<body class="dashboard-body">
+
+  <!-- ── Header ──────────────────────────────────────────────── -->
+  <header class="header">
+    <div class="header-brand">
+      <div class="header-logo" aria-hidden="true">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none"
+             stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="6 9 6 2 18 2 18 9"/>
+          <path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/>
+          <rect x="6" y="14" width="12" height="8"/>
+          <line x1="9" y1="7" x2="15" y2="7"/>
+        </svg>
+      </div>
+      <span class="header-title">PrintCam</span>
+    </div>
+
+    <div class="header-right">
+      <!-- Pulsante Aggiungi Camera -->
+      <button class="btn-action btn-add-cam" id="btnAddCamera" title="Aggiungi una nuova telecamera">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <line x1="12" y1="5" x2="12" y2="19"></line>
+          <line x1="5" y1="12" x2="19" y2="12"></line>
+        </svg>
+        <span>Nuova Camera</span>
+      </button>
+
+      <!-- Pulsante Riordina -->
+      <button class="btn-action btn-reorder" id="btnToggleReorder" title="Attiva/disattiva modalità riordino drag & drop">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="5 9 2 12 5 15"></polyline>
+          <polyline points="9 5 12 2 15 5"></polyline>
+          <polyline points="15 19 12 22 9 19"></polyline>
+          <polyline points="19 9 22 12 19 15"></polyline>
+          <line x1="2" y1="12" x2="22" y2="12"></line>
+          <line x1="12" y1="2" x2="12" y2="22"></line>
+        </svg>
+        <span id="reorderText">Riordina</span>
+      </button>
+
+      <!-- Stato go2rtc -->
+      <div class="server-status" id="serverStatus" title="Stato server go2rtc">
+        <div class="status-dot" id="statusDot"></div>
+        <span id="statusText">Connessione...</span>
+      </div>
+
+      <!-- Utente -->
+      <div class="header-user" id="headerUser" aria-label="Utente connesso">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none"
+             stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
+          <circle cx="12" cy="7" r="4"/>
+        </svg>
+        <span id="headerUsername">barbalab</span>
+      </div>
+
+      <!-- Logout -->
+      <a href="/logout" class="btn-logout" id="logoutBtn" aria-label="Disconnetti">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none"
+             stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/>
+          <polyline points="16 17 21 12 16 7"/>
+          <line x1="21" y1="12" x2="9" y2="12"/>
+        </svg>
+        <span>Esci</span>
+      </a>
+    </div>
+  </header>
+
+  <!-- ── Griglia camere (Renderizzata Dinamicamente) ─────────── -->
+  <main class="cameras-grid" id="dashboard" role="main">
+    <!-- Le schede delle telecamere vengono caricate dinamicamente via JS -->
+  </main>
+
+  <!-- ── Modale Aggiungi / Modifica Camera ────────────────────── -->
+  <div class="modal-backdrop" id="cameraModal" aria-hidden="true">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h3 id="modalTitle">Impostazioni Camera</h3>
+        <button type="button" class="btn-close-modal" id="btnCloseModal">&times;</button>
+      </div>
+      <form id="cameraForm">
+        <input type="hidden" id="camId" value="" />
+
+        <div class="form-group">
+          <label for="camName">Nome Camera</label>
+          <input type="text" id="camName" placeholder="es. Visuale dall'Alto" required />
+        </div>
+
+        <div class="form-group">
+          <label for="camUrl">URL Sorgente (RTSP / RTSPS / HTTP)</label>
+          <input type="text" id="camUrl" placeholder="rtsp://... o rtsps://... o http://..." required />
+        </div>
+
+        <div class="form-row">
+          <div class="form-group">
+            <label for="camMode">Tipo Flusso</label>
+            <select id="camMode">
+              <option value="ffmpeg-mjpeg">FFmpeg MJPEG (Auto H.264/H.265/RTSPS)</option>
+              <option value="mjpeg">MJPEG / HTTP Diretto</option>
+            </select>
+          </div>
+
+          <div class="form-group">
+            <label for="camFitMode">Visualizzazione Video</label>
+            <select id="camFitMode">
+              <option value="contain">Contieni (Contain - Proporzioni native)</option>
+              <option value="cover">Riempi (Cover - Nessuna barra nera)</option>
+              <option value="fill">Stira (Fill - Adatta a scheda)</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="modal-actions">
+          <button type="button" class="btn-modal-delete" id="btnDeleteCamera" style="display: none;">
+            🗑️ Rimuovi Camera
+          </button>
+          <div class="modal-right-actions">
+            <button type="button" class="btn-modal-cancel" id="btnCancelModal">Annulla</button>
+            <button type="submit" class="btn-modal-save" id="btnSaveCamera">Salva</button>
+          </div>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- ── Footer ────────────────────────────────────────────── -->
+  <footer class="footer">
+    <span class="footer-clock" id="clock" aria-label="Ora corrente"></span>
+    <span class="footer-info">PrintCam &mdash; Synology NAS</span>
+  </footer>
+
+  <script src="app.js"></script>
+</body>
+</html>

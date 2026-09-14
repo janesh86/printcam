@@ -1,0 +1,39 @@
+version: '3.8'
+
+services:
+
+  # go2rtc: gestisce i flussi RTSP e MJPEG delle telecamere
+  # Gira in modalità host per accedere direttamente agli IP delle cam sulla LAN
+  go2rtc:
+    image: alexxit/go2rtc
+    network_mode: host
+    volumes:
+      # Percorso ASSOLUTO sul NAS — adatta se la tua cartella è in un volume diverso
+      - /volume1/docker/printcam/go2rtc.yaml:/config/go2rtc.yaml
+    restart: unless-stopped
+
+  # App Node.js: serve la dashboard web con autenticazione
+  # Usa l'immagine node ufficiale + monta il codice come volume (no build step)
+  app:
+    image: node:20-alpine
+    working_dir: /app
+    # Installa dipendenze al primo avvio, poi avvia il server
+    command: sh -c "npm install --omit=dev && node server.js"
+    ports:
+      - "3000:3000"
+    volumes:
+      # Percorso ASSOLUTO sul NAS — monta tutta la cartella del progetto
+      - /volume1/docker/printcam:/app
+    environment:
+      # Valori non sensibili inline
+      - GO2RTC_URL=http://host.docker.internal:1984
+      - PORT=3000
+      # Valori sensibili: impostali nella sezione "Environment variables" di Portainer
+      - LOGIN_USERNAME=${LOGIN_USERNAME}
+      - LOGIN_PASSWORD=${LOGIN_PASSWORD}
+      - SESSION_SECRET=${SESSION_SECRET}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
+    depends_on:
+      - go2rtc
