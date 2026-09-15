@@ -5,6 +5,8 @@
     "url": "rtsp://admin:L2fkhVaq@192.168.1.124:554/cam/realmonitor?channel=1&subtype=0",
     "mode": "ffmpeg-mjpeg",
     "fitMode": "contain",
+    "panX": 50,
+    "panY": 50,
     "order": 1
   },
   {
@@ -13,6 +15,8 @@
     "url": "http://192.168.1.55/ipcam/mjpeg.cgi",
     "mode": "mjpeg",
     "fitMode": "contain",
+    "panX": 50,
+    "panY": 50,
     "order": 2
   },
   {
@@ -21,6 +25,8 @@
     "url": "rtsps://bblp:aa7807c9@192.168.1.65:322/streaming/live/1",
     "mode": "ffmpeg-mjpeg",
     "fitMode": "contain",
+    "panX": 50,
+    "panY": 50,
     "order": 3
   }
 ]

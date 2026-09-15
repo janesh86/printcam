@@ -225,7 +225,7 @@ app.get('/api/cameras', requireAuth, (req, res) => {
 
 // POST /api/cameras - Crea nuova fotocamera
 app.post('/api/cameras', requireAuth, (req, res) => {
-  const { name, url, mode, fitMode } = req.body;
+  const { name, url, mode, fitMode, panX, panY } = req.body;
   if (!name || !url) {
     return res.status(400).json({ success: false, message: 'Nome e URL sono obbligatori' });
   }
@@ -238,6 +238,8 @@ app.post('/api/cameras', requireAuth, (req, res) => {
     url: url.trim(),
     mode: mode || 'ffmpeg-mjpeg',
     fitMode: fitMode || 'contain',
+    panX: typeof panX === 'number' ? panX : 50,
+    panY: typeof panY === 'number' ? panY : 50,
     order: cameras.length + 1
   };
 
@@ -251,7 +253,7 @@ app.post('/api/cameras', requireAuth, (req, res) => {
 // PUT /api/cameras/:id - Modifica fotocamera
 app.put('/api/cameras/:id', requireAuth, (req, res) => {
   const { id } = req.params;
-  const { name, url, mode, fitMode } = req.body;
+  const { name, url, mode, fitMode, panX, panY } = req.body;
 
   const cameras = loadCameras();
   const idx = cameras.findIndex(c => c.id === id);
@@ -259,15 +261,18 @@ app.put('/api/cameras/:id', requireAuth, (req, res) => {
     return res.status(404).json({ success: false, message: 'Camera non trovata' });
   }
 
-  if (name) cameras[idx].name = name.trim();
-  if (url) cameras[idx].url = url.trim();
-  if (mode) cameras[idx].mode = mode;
-  if (fitMode) cameras[idx].fitMode = fitMode;
+  if (name !== undefined) cameras[idx].name = name.trim();
+  if (url !== undefined) cameras[idx].url = url.trim();
+  if (mode !== undefined) cameras[idx].mode = mode;
+  if (fitMode !== undefined) cameras[idx].fitMode = fitMode;
+  if (panX !== undefined) cameras[idx].panX = typeof panX === 'number' ? panX : Number(panX);
+  if (panY !== undefined) cameras[idx].panY = typeof panY === 'number' ? panY : Number(panY);
 
   saveCameras(cameras);
   syncCameraToGo2Rtc(cameras[idx]);
 
   res.json({ success: true, camera: cameras[idx] });
+
 });
 
 // DELETE /api/cameras/:id - Rimuove fotocamera

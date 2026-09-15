@@ -292,6 +292,16 @@ function renderCameras(cameras) {
         <img id="img-${cam.id}" class="camera-img" alt="${cam.name}" draggable="false" />
         <canvas id="canvas-${cam.id}" class="camera-canvas ${fitClass}" aria-hidden="true"></canvas>
 
+        ${cam.fitMode === 'cover' ? `
+        <div class="camera-pan-pad" id="panpad-${cam.id}" title="Regola area inquadrata (Pan)">
+          <button class="btn-pan btn-pan-up" data-dir="up" title="Sposta in alto">▲</button>
+          <button class="btn-pan btn-pan-left" data-dir="left" title="Sposta a sinistra">◀</button>
+          <button class="btn-pan btn-pan-center" data-dir="center" title="Reimposta centro">🎯</button>
+          <button class="btn-pan btn-pan-right" data-dir="right" title="Sposta a destra">▶</button>
+          <button class="btn-pan btn-pan-down" data-dir="down" title="Sposta in basso">▼</button>
+        </div>
+        ` : ''}
+
       </div>
 
       <div class="camera-overlay">
@@ -344,10 +354,14 @@ function renderCameras(cameras) {
 
     // Inizializza lo stream video
     activeCameraCleanups[cam.id] = setupCamera(cam.id);
+
+    // Inizializza il Pan Control se in modalità cover
+    setupPanControl(cam, card.querySelector(`#canvas-${cam.id}`), card);
   });
 
   setupDragAndDrop();
 }
+
 
 // ─── Stream Video & Freeze Frame Logic ────────────────────────────────────────
 
@@ -453,7 +467,98 @@ function setupCamera(id) {
   };
 }
 
+// ─── Controllo Pan / Area Inquadrata (Modalità Cover) ─────────────────────────
+
+let panSaveTimers = {};
+
+function debouncedSavePan(id, panX, panY) {
+  clearTimeout(panSaveTimers[id]);
+  panSaveTimers[id] = setTimeout(async () => {
+    try {
+      await fetch(`/api/cameras/${id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ panX, panY }),
+      });
+    } catch (err) {
+      console.error('Errore salvataggio pan:', err);
+    }
+  }, 400);
+}
+
+function setupPanControl(cam, canvas, card) {
+  if (!canvas) return;
+
+  let panX = typeof cam.panX === 'number' ? cam.panX : 50;
+  let panY = typeof cam.panY === 'number' ? cam.panY : 50;
+
+  function applyPan() {
+    canvas.style.setProperty('--pan-x', `${panX}%`);
+    canvas.style.setProperty('--pan-y', `${panY}%`);
+    debouncedSavePan(cam.id, panX, panY);
+  }
+
+  // Applica coordinate iniziali
+  canvas.style.setProperty('--pan-x', `${panX}%`);
+  canvas.style.setProperty('--pan-y', `${panY}%`);
+
+  // Gestore D-Pad Overlay
+  const panPad = card.querySelector('.camera-pan-pad');
+  if (panPad) {
+    panPad.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const btn = e.target.closest('.btn-pan');
+      if (!btn) return;
+      const dir = btn.getAttribute('data-dir');
+      if (dir === 'up') panY = Math.max(0, panY - 10);
+      else if (dir === 'down') panY = Math.min(100, panY + 10);
+      else if (dir === 'left') panX = Math.max(0, panX - 10);
+      else if (dir === 'right') panX = Math.min(100, panX + 10);
+      else if (dir === 'center') { panX = 50; panY = 50; }
+      applyPan();
+    });
+  }
+
+  // Touch & Mouse Drag-to-Pan sul video
+  if (cam.fitMode === 'cover') {
+    let isPanning = false;
+    let lastX = 0;
+    let lastY = 0;
+
+    canvas.addEventListener('pointerdown', (e) => {
+      if (isReorderMode) return;
+      isPanning = true;
+      lastX = e.clientX;
+      lastY = e.clientY;
+      try { canvas.setPointerCapture(e.pointerId); } catch (_) {}
+    });
+
+    canvas.addEventListener('pointermove', (e) => {
+      if (!isPanning) return;
+      const dx = e.clientX - lastX;
+      const dy = e.clientY - lastY;
+      lastX = e.clientX;
+      lastY = e.clientY;
+
+      // Pan naturale (trascinamento video)
+      panX = Math.max(0, Math.min(100, panX - Math.round(dx / 3)));
+      panY = Math.max(0, Math.min(100, panY - Math.round(dy / 3)));
+      applyPan();
+    });
+
+    const endPan = (e) => {
+      if (!isPanning) return;
+      isPanning = false;
+      try { canvas.releasePointerCapture(e.pointerId); } catch (_) {}
+    };
+
+    canvas.addEventListener('pointerup', endPan);
+    canvas.addEventListener('pointercancel', endPan);
+  }
+}
+
 // ─── Gestione Modal Aggiungi / Modifica Camera ───────────────────────────────
+
 
 function setupModalEvents() {
   const modal = document.getElementById('cameraModal');

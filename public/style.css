@@ -881,7 +881,70 @@ body {
   min-width: 100%; min-height: 100%;
   width: auto; height: auto;
   object-fit: cover;
+  object-position: var(--pan-x, 50%) var(--pan-y, 50%);
+  cursor: grab;
 }
+.camera-canvas.fit-cover:active {
+  cursor: grabbing;
+}
+
+/* ── Pan D-Pad Overlay (per la modalità Cover) ─────────────────── */
+.camera-pan-pad {
+  position: absolute;
+  top: 50px; left: 12px;
+  z-index: 6;
+  display: grid;
+  grid-template-columns: repeat(3, 26px);
+  grid-template-rows: repeat(3, 26px);
+  gap: 3px;
+  padding: 4px;
+  background: rgba(0, 0, 0, 0.65);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 10px;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  opacity: 0;
+  transition: opacity var(--transition);
+}
+
+.camera-card:hover .camera-pan-pad {
+  opacity: 1;
+}
+
+@media (max-width: 800px) {
+  .camera-pan-pad {
+    opacity: 1 !important;
+  }
+}
+
+.btn-pan {
+  width: 26px; height: 26px;
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 5px;
+  color: var(--text-primary);
+  font-size: 11px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all var(--transition);
+  user-select: none;
+}
+.btn-pan:hover {
+  background: rgba(0, 212, 255, 0.35);
+  border-color: var(--accent-cyan);
+  color: #fff;
+}
+.btn-pan:active {
+  transform: scale(0.9);
+}
+.btn-pan-up { grid-column: 2; grid-row: 1; }
+.btn-pan-left { grid-column: 1; grid-row: 2; }
+.btn-pan-center { grid-column: 2; grid-row: 2; font-size: 9px; }
+.btn-pan-right { grid-column: 3; grid-row: 2; }
+.btn-pan-down { grid-column: 2; grid-row: 3; }
+
 .camera-canvas.fit-fill {
   position: absolute;
   top: 0; left: 0;
