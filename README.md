@@ -60,7 +60,7 @@ Crea un file `.env` oppure inserisci le variabili direttamente nell'interfaccia 
 ```env
 PORT=3000
 GO2RTC_URL=http://host.docker.internal:1984
-LOGIN_USERNAME=barbalab
+LOGIN_USERNAME=nome_utente
 LOGIN_PASSWORD=tua_password_sicura
 SESSION_SECRET=un_hash_segreto_casuale_molto_lungo
 ```
