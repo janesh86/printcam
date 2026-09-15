@@ -27,6 +27,25 @@ Progettata specificamente per l'hosting leggero su **Synology NAS** (via Contain
 
 ---
 
+## 🐼 Come trovare IP e Codice Accesso della Camera Bambu Lab
+
+Per collegare una stampante Bambu Lab (X1C, P1S, A1, A1 Mini) usa la seguente struttura URL:
+
+```text
+rtsps://bblp:CODICE_SOLO_LAN@192.168.1.XX:322/streaming/live/1
+```
+
+### Dettagli parametri:
+- **Username**: `bblp` *(username fisso per tutte le stampanti Bambu Lab)*
+- **Password**: Il **Codice di Accesso Modalità Solo LAN** *(LAN Access Code)*
+  - Reperibile sul display della stampante: **Impostazioni** ⚙️ → **Rete / Network** → **Access Code / Codice di Accesso**.
+  - Reperibile anche su Bambu Studio / OrcaSlicer nelle impostazioni del dispositivo.
+- **IP Stampante**: L'indirizzo IP locale assegnato alla tua stampante dal router (es. `192.168.1.65`).
+- **Porta**: `322` *(porta RTSPS cifrata standard Bambu Lab)*
+- **Path**: `/streaming/live/1`
+
+---
+
 ## 🏗️ Architettura del Sistema
 
 ```text
