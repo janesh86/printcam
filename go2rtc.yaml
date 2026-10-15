@@ -1,21 +1,17 @@
 streams:
   # Camera 1 - IMOU Ranger 2C (H.265) → FFmpeg trascodifica in MJPEG
-  # go2rtc gestisce internamente la riconnessione RTSP
   cam1: "ffmpeg:rtsp://admin:L2fkhVaq@192.168.1.124:554/cam/realmonitor?channel=1&subtype=0#video=mjpeg"
 
-  # ALTERNATIVA (meno CPU, qualità minore): usa il sub-stream che è spesso H.264
-  # cam1: rtsp://admin:L2fkhVaq@192.168.1.124:554/cam/realmonitor?channel=1&subtype=1
-
-  # Camera 2 - MJPEG HTTP (funziona già)
-  cam2: http://192.168.1.55/ipcam/mjpeg.cgi
+  # Camera 2 - MJPEG HTTP (IP aggiornato a .61)
+  cam2: "http://192.168.1.61/ipcam/mjpeg.cgi"
 
   # Camera 3 - Bambu Lab RTSPS → FFmpeg trascodifica in MJPEG
   cam3: "ffmpeg:rtsps://bblp:aa7807c9@192.168.1.65:322/streaming/live/1#video=mjpeg"
 
-# Configurazione API - go2rtc ascolta su tutte le interfacce del host
+# Configurazione API
 api:
   listen: ":1984"
 
-# Log level: info, debug, trace
+# Log level
 log:
   level: info

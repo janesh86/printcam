@@ -77,8 +77,8 @@ function syncCameraToGo2Rtc(camera) {
   }
 
   const url = new URL(`${GO2RTC_URL}/api/streams`);
-  url.searchParams.append('src', camera.id);
-  url.searchParams.append('val', streamVal);
+  url.searchParams.append('name', camera.id);
+  url.searchParams.append('src', streamVal);
 
   const req = http.request(url, { method: 'PUT', timeout: 5000 }, (res) => {
     console.log(`[GO2RTC] Sync stream "${camera.id}" -> status ${res.statusCode}`);
@@ -94,7 +94,7 @@ function syncCameraToGo2Rtc(camera) {
  */
 function removeCameraFromGo2Rtc(id) {
   const url = new URL(`${GO2RTC_URL}/api/streams`);
-  url.searchParams.append('src', id);
+  url.searchParams.append('name', id);
 
   const req = http.request(url, { method: 'DELETE', timeout: 5000 }, (res) => {
     console.log(`[GO2RTC] Delete stream "${id}" -> status ${res.statusCode}`);
@@ -110,8 +110,11 @@ function syncAllCamerasToGo2Rtc() {
   cameras.forEach(syncCameraToGo2Rtc);
 }
 
-// Inizializza sincronizzazione al caricamento
-setTimeout(syncAllCamerasToGo2Rtc, 2000);
+// Inizializza sincronizzazione al caricamento e riprova dopo 3s e 10s se go2rtc si avvia lentamente
+syncAllCamerasToGo2Rtc();
+setTimeout(syncAllCamerasToGo2Rtc, 3000);
+setTimeout(syncAllCamerasToGo2Rtc, 10000);
+
 
 // ─── Configurazione Express ────────────────────────────────────────────────────
 
@@ -321,6 +324,14 @@ app.get('/api/status', requireAuth, (req, res) => {
     proxyRes.on('end', () => {
       try {
         const streams = JSON.parse(data);
+        // Autoricostruzione: se go2rtc è online ma mancano flussi, risincronizzali
+        const cameras = loadCameras();
+        cameras.forEach(cam => {
+          if (!streams || !streams[cam.id]) {
+            console.log(`[GO2RTC] Flusso "${cam.id}" non trovato in go2rtc, risincronizzazione automatica...`);
+            syncCameraToGo2Rtc(cam);
+          }
+        });
         res.json({ online: true, streams });
       } catch {
         res.json({ online: true });
@@ -347,11 +358,21 @@ function createStreamProxy() {
     const proxyReq = http.get(streamUrl, { timeout: 10000 }, (proxyRes) => {
       if (proxyRes.statusCode !== 200) {
         console.error(`[STREAM] go2rtc ha risposto ${proxyRes.statusCode} per ${src}`);
+        // Se go2rtc restituisce 404, il flusso non è registrato in memoria: tentiamo la sincronizzazione al volo
+        if (proxyRes.statusCode === 404) {
+          const cameras = loadCameras();
+          const cam = cameras.find(c => c.id === src);
+          if (cam) {
+            console.log(`[STREAM] Tento auto-sincronizzazione al volo per "${src}"...`);
+            syncCameraToGo2Rtc(cam);
+          }
+        }
         if (!res.headersSent) {
           res.status(502).send('Camera non disponibile');
         }
         return;
       }
+
 
       const contentType = proxyRes.headers['content-type'] || 'multipart/x-mixed-replace; boundary=myboundary';
 

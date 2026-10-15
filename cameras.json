@@ -12,7 +12,7 @@
   {
     "id": "cam2",
     "name": "Visuale Frontale",
-    "url": "http://192.168.1.55/ipcam/mjpeg.cgi",
+    "url": "http://192.168.1.61/ipcam/mjpeg.cgi",
     "mode": "mjpeg",
     "fitMode": "contain",
     "panX": 50,
