@@ -21,6 +21,8 @@ Progettata specificamente per l'hosting leggero su **Synology NAS** (via Contain
   - **Stira (Fill)**: Adatta l'immagine all'intera scheda.
   - **Riempi (Cover)**: Rimuove le barre nere con zoom dinamico.
 - 🎯 **D-Pad Pan & Drag-to-Pan**: In modalità *Cover*, regola l'area inquadrata usando il D-Pad direzionale (▲ ◀ 🎯 ▶ ▼) o trascinando direttamente il video con il dito.
+- 🎬 **Timelapse Combinato Multi-Prospettiva**: Registra timelapse sincronizzati su richiesta selezionando l'intervallo di scatto (es. ogni 5s, 10s, 30s) e framerate (30fps, 60fps). FFmpeg compila automaticamente un unico video panoramico (`.mp4`) che unisce i flussi affiancati, rispettando fedelmente l'ordine della dashboard, il fit (`cover`/`contain`/`fill`) e il pan/inquadratura scelto per ciascuna telecamera!
+- 📺 **Player Video & Download Integrato**: Guarda le registrazioni direttamente dal browser con streaming HTML5 istantaneo o scaricale sul tuo dispositivo.
 - ❄️ **Canvas Freeze-Frame (No Schermate Nere)**: Durante le brevi riconnessioni FFmpeg/RTSP, la dashboard mostra l'ultimo frame catturato invece di uno schermo nero.
 - 🔐 **Autenticazione Sicura**: Protezione sessione Express con confronto a tempo costante per prevenire timing attacks e supporto HTTPS tramite Synology Reverse Proxy.
 - 🚀 **Engine go2rtc Integrato**: Trascodifica ad alta efficienza e bassissima latenza.
@@ -102,7 +104,7 @@ services:
   app:
     image: node:20-alpine
     working_dir: /app
-    command: sh -c "npm install --omit=dev && node server.js"
+    command: sh -c "apk add --no-cache ffmpeg && npm install --omit=dev && node server.js"
     ports:
       - "3000:3000"
     volumes:

@@ -184,6 +184,9 @@ function initDashboard() {
 
   setupModalEvents();
 
+  // ── Timelapse UI ───────────────────────────────────────────
+  initTimelapseUI();
+
   // ── Caricamento Camere ─────────────────────────────────────
   loadAndRenderCameras();
 
@@ -193,6 +196,7 @@ function initDashboard() {
       document.exitFullscreen();
     }
   });
+
 }
 
 // ─── Caricamento e Rendering delle Camere ──────────────────────────────────────
@@ -805,3 +809,284 @@ function toggleFullscreen(el) {
     document.exitFullscreen();
   }
 }
+
+// ══════════════════════════════════════════════════════════════
+// TIMELAPSE CONTROLLER & GALLERY
+// ══════════════════════════════════════════════════════════════
+
+let timelapsePollTimer = null;
+let currentTimelapseStatus = null;
+
+function initTimelapseUI() {
+  const btnTimelapse = document.getElementById('btnTimelapse');
+  const modal = document.getElementById('timelapseModal');
+  const btnClose = document.getElementById('btnCloseTimelapseModal');
+  const form = document.getElementById('timelapseStartForm');
+  const btnStop = document.getElementById('btnStopTimelapse');
+
+  // Player modal
+  const playerModal = document.getElementById('videoPlayerModal');
+  const btnClosePlayer = document.getElementById('btnClosePlayerModal');
+  const videoPlayer = document.getElementById('timelapseVideoPlayer');
+
+  btnTimelapse.addEventListener('click', () => {
+    openTimelapseModal();
+  });
+
+  [btnClose, modal].forEach(el => {
+    el.addEventListener('click', (e) => {
+      if (e.target === el) closeTimelapseModal();
+    });
+  });
+
+  [btnClosePlayer, playerModal].forEach(el => {
+    el.addEventListener('click', (e) => {
+      if (e.target === el) {
+        playerModal.classList.remove('active');
+        videoPlayer.pause();
+        videoPlayer.src = '';
+      }
+    });
+  });
+
+  // Avvio registrazione
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const interval = parseInt(document.getElementById('tlInterval').value, 10) || 10;
+    const fps = parseInt(document.getElementById('tlFps').value, 10) || 30;
+
+    // Raccoglie le telecamere selezionate rispettando l'ordine della dashboard
+    const checkboxes = document.querySelectorAll('.tl-cam-checkbox:checked');
+    const cameraIds = Array.from(checkboxes).map(cb => cb.value);
+
+    if (cameraIds.length === 0) {
+      alert('Seleziona almeno una telecamera per il timelapse!');
+      return;
+    }
+
+    try {
+      const res = await fetch('/api/timelapse/start', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ interval, fps, cameraIds })
+      });
+      const data = await res.json();
+      if (data.success) {
+        checkTimelapseStatus();
+      } else {
+        alert(data.message || 'Errore durante l\'avvio del timelapse');
+      }
+    } catch (err) {
+      alert('Errore di comunicazione col server: ' + err.message);
+    }
+  });
+
+  // Stop registrazione
+  btnStop.addEventListener('click', async () => {
+    if (!confirm('Vuoi fermare la registrazione e procedere con l\'assemblaggio del video combinato?')) return;
+
+    btnStop.disabled = true;
+    btnStop.textContent = 'Arresto in corso...';
+
+    try {
+      const res = await fetch('/api/timelapse/stop', { method: 'POST' });
+      const data = await res.json();
+      if (data.success) {
+        checkTimelapseStatus();
+      } else {
+        alert(data.message || 'Errore durante l\'arresto');
+      }
+    } catch (err) {
+      alert('Errore di comunicazione: ' + err.message);
+    } finally {
+      btnStop.disabled = false;
+      btnStop.textContent = '⏹️ Ferma & Genera Video';
+    }
+  });
+
+  // Controllo iniziale stato timelapse & polling periodico
+  checkTimelapseStatus();
+  setInterval(checkTimelapseStatus, 4000);
+}
+
+async function checkTimelapseStatus() {
+  try {
+    const res = await fetch('/api/timelapse/status');
+    const data = await res.json();
+    if (data.success) {
+      currentTimelapseStatus = data.status;
+      renderTimelapseStatus(currentTimelapseStatus);
+    }
+  } catch (_) {}
+}
+
+function renderTimelapseStatus(st) {
+  const btn = document.getElementById('btnTimelapse');
+  const dot = document.getElementById('headerRecDot');
+  const text = document.getElementById('timelapseBtnText');
+
+  const activePanel = document.getElementById('timelapseActivePanel');
+  const setupPanel = document.getElementById('timelapseSetupPanel');
+  const compilingPanel = document.getElementById('timelapseCompilingPanel');
+
+  if (st.isCompiling) {
+    dot.style.display = 'none';
+    btn.classList.remove('recording');
+    text.textContent = 'Elaborazione...';
+
+    activePanel.style.display = 'none';
+    setupPanel.style.display = 'none';
+    compilingPanel.style.display = 'block';
+  } else if (st.isRunning) {
+    dot.style.display = 'inline-block';
+    btn.classList.add('recording');
+    text.textContent = `REC (${formatDuration(st.elapsedSec)})`;
+
+    activePanel.style.display = 'block';
+    setupPanel.style.display = 'none';
+    compilingPanel.style.display = 'none';
+
+    document.getElementById('tlLiveDuration').textContent = formatDuration(st.elapsedSec);
+    document.getElementById('tlLiveFrames').textContent = st.frameCount;
+    document.getElementById('tlLiveInterval').textContent = `${st.interval}s`;
+  } else {
+    dot.style.display = 'none';
+    btn.classList.remove('recording');
+    text.textContent = 'Timelapse';
+
+    activePanel.style.display = 'none';
+    setupPanel.style.display = 'block';
+    compilingPanel.style.display = 'none';
+  }
+}
+
+function openTimelapseModal() {
+  const modal = document.getElementById('timelapseModal');
+  modal.classList.add('active');
+
+  // Popola la lista delle checkbox delle telecamere (nell'esatto ordine attuale della dashboard)
+  const listEl = document.getElementById('timelapseCamList');
+  listEl.innerHTML = '';
+
+  currentCameras.forEach(cam => {
+    const item = document.createElement('label');
+    item.className = 'tl-cam-item';
+
+    const fitLabel = cam.fitMode === 'cover'
+      ? `Cover (Pan ${cam.panX || 50}%, ${cam.panY || 50}%)`
+      : (cam.fitMode === 'fill' ? 'Stira (Fill)' : 'Contieni (Contain)');
+
+    item.innerHTML = `
+      <div class="tl-cam-left">
+        <input type="checkbox" class="tl-cam-checkbox" value="${cam.id}" checked />
+        <span class="tl-cam-name">${cam.name}</span>
+      </div>
+      <span class="tl-cam-badge">${fitLabel}</span>
+    `;
+    listEl.appendChild(item);
+  });
+
+  // Carica l'elenco dei video precedentemente registrati
+  loadTimelapseArchive();
+}
+
+function closeTimelapseModal() {
+  document.getElementById('timelapseModal').classList.remove('active');
+}
+
+async function loadTimelapseArchive() {
+  const listEl = document.getElementById('timelapseVideoList');
+  const countEl = document.getElementById('tlArchiveCount');
+
+  try {
+    const res = await fetch('/api/timelapse/list');
+    const data = await res.json();
+    if (!data.success || !Array.isArray(data.videos)) return;
+
+    const videos = data.videos;
+    countEl.textContent = `${videos.length} video`;
+
+    if (videos.length === 0) {
+      listEl.innerHTML = `
+        <div style="text-align: center; padding: 24px; color: var(--text-muted); font-size: 13px;">
+          Nessun video timelapse salvato. Avviane uno all'inizio della stampa!
+        </div>
+      `;
+      return;
+    }
+
+    listEl.innerHTML = '';
+    videos.forEach(v => {
+      const item = document.createElement('div');
+      item.className = 'tl-video-item';
+
+      const dateStr = v.completedAt ? new Date(v.completedAt).toLocaleString('it-IT', {
+        day: '2-digit', month: '2-digit', year: 'numeric',
+        hour: '2-digit', minute: '2-digit'
+      }) : 'Video';
+
+      const camNames = v.cameras ? v.cameras.map(c => c.name).join(' + ') : 'Multi-cam';
+
+      item.innerHTML = `
+        <img class="tl-video-thumb" src="/api/timelapse/thumbnail/${v.thumbnail}" onerror="this.style.display='none'" alt="Anteprima" />
+        <div class="tl-video-info">
+          <div class="tl-video-title">${dateStr}</div>
+          <div class="tl-video-meta">${v.durationSec}s • ${v.frameCount} frame • ${v.fileSizeMB} MB • ${camNames}</div>
+        </div>
+        <div class="tl-video-actions">
+          <button class="btn-tl-action btn-tl-play" title="Riproduci video">▶ Play</button>
+          <a class="btn-tl-action" href="/api/timelapse/video/${v.filename}" download title="Scarica video MP4">⬇ Scarica</a>
+          <button class="btn-tl-action btn-tl-delete" title="Elimina video">🗑️</button>
+        </div>
+      `;
+
+      // Play
+      item.querySelector('.btn-tl-play').addEventListener('click', () => {
+        playTimelapseVideo(v);
+      });
+
+      // Delete
+      item.querySelector('.btn-tl-delete').addEventListener('click', async () => {
+        if (!confirm(`Sei sicuro di voler eliminare il video del ${dateStr}?`)) return;
+        try {
+          const delRes = await fetch(`/api/timelapse/video/${v.filename}`, { method: 'DELETE' });
+          const delData = await delRes.json();
+          if (delData.success) {
+            loadTimelapseArchive();
+          }
+        } catch (_) {}
+      });
+
+      listEl.appendChild(item);
+    });
+  } catch (err) {
+    console.error('Errore caricamento archivio timelapse:', err);
+  }
+}
+
+function playTimelapseVideo(video) {
+  const playerModal = document.getElementById('videoPlayerModal');
+  const videoPlayer = document.getElementById('timelapseVideoPlayer');
+  const title = document.getElementById('playerModalTitle');
+  const btnDownload = document.getElementById('btnDownloadPlayerVideo');
+
+  const dateStr = video.completedAt ? new Date(video.completedAt).toLocaleString('it-IT') : 'Timelapse';
+  title.textContent = `Riproduzione: ${dateStr}`;
+
+  const videoUrl = `/api/timelapse/video/${video.filename}`;
+  videoPlayer.src = videoUrl;
+  btnDownload.href = videoUrl;
+  btnDownload.download = video.filename;
+
+  playerModal.classList.add('active');
+  videoPlayer.play().catch(() => {});
+}
+
+function formatDuration(sec) {
+  if (!sec || isNaN(sec)) sec = 0;
+  const h = Math.floor(sec / 3600);
+  const m = Math.floor((sec % 3600) / 60);
+  const s = Math.floor(sec % 60);
+  return [h, m, s].map(v => String(v).padStart(2, '0')).join(':');
+}
+

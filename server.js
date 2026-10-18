@@ -6,6 +6,7 @@ const http = require('http');
 const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
+const timelapse = require('./timelapse');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -347,7 +348,115 @@ app.get('/api/status', requireAuth, (req, res) => {
   });
 });
 
+// ─── Route API Timelapse (protette da auth) ───────────────────────────────────
+
+// Stato attuale registrazione
+app.get('/api/timelapse/status', requireAuth, (req, res) => {
+  res.json({ success: true, status: timelapse.getStatus() });
+});
+
+// Avvia registrazione timelapse
+app.post('/api/timelapse/start', requireAuth, (req, res) => {
+  try {
+    const { interval, fps, cameraIds } = req.body;
+    const allCameras = loadCameras();
+
+    // Seleziona solo le telecamere richieste, mantenendo l'ordine da cameras.json
+    let selectedCameras = allCameras;
+    if (Array.isArray(cameraIds) && cameraIds.length > 0) {
+      selectedCameras = allCameras.filter(c => cameraIds.includes(c.id));
+    }
+
+    if (selectedCameras.length === 0) {
+      return res.status(400).json({ success: false, message: 'Nessuna camera valida selezionata' });
+    }
+
+    const status = timelapse.start({
+      interval: interval || 10,
+      fps: fps || 30,
+      selectedCameras,
+      go2rtcUrl: GO2RTC_URL
+    });
+
+    res.json({ success: true, status });
+  } catch (err) {
+    res.status(400).json({ success: false, message: err.message });
+  }
+});
+
+// Ferma registrazione e avvia assemblaggio video FFmpeg
+app.post('/api/timelapse/stop', requireAuth, async (req, res) => {
+  try {
+    const result = await timelapse.stop();
+    res.json(result);
+  } catch (err) {
+    res.status(400).json({ success: false, message: err.message });
+  }
+});
+
+// Elenco video generati
+app.get('/api/timelapse/list', requireAuth, (req, res) => {
+  res.json({ success: true, videos: timelapse.listVideos() });
+});
+
+// Download o streaming video con supporto Range
+app.get('/api/timelapse/video/:filename', requireAuth, (req, res) => {
+  const filename = path.basename(req.params.filename);
+  const filePath = path.join(timelapse.VIDEOS_DIR, filename);
+
+  if (!fs.existsSync(filePath)) {
+    return res.status(404).send('Video non trovato');
+  }
+
+  const stat = fs.statSync(filePath);
+  const fileSize = stat.size;
+  const range = req.headers.range;
+
+  if (range) {
+    const parts = range.replace(/bytes=/, "").split("-");
+    const start = parseInt(parts[0], 10);
+    const end = parts[1] ? parseInt(parts[1], 10) : fileSize - 1;
+    const chunksize = (end - start) + 1;
+    const file = fs.createReadStream(filePath, { start, end });
+    const head = {
+      'Content-Range': `bytes ${start}-${end}/${fileSize}`,
+      'Accept-Ranges': 'bytes',
+      'Content-Length': chunksize,
+      'Content-Type': 'video/mp4',
+    };
+    res.writeHead(206, head);
+    file.pipe(res);
+  } else {
+    const head = {
+      'Content-Length': fileSize,
+      'Content-Type': 'video/mp4',
+      'Accept-Ranges': 'bytes'
+    };
+    res.writeHead(200, head);
+    fs.createReadStream(filePath).pipe(res);
+  }
+});
+
+// Thumbnail video
+app.get('/api/timelapse/thumbnail/:filename', requireAuth, (req, res) => {
+  const filename = path.basename(req.params.filename);
+  const filePath = path.join(timelapse.VIDEOS_DIR, filename);
+  if (fs.existsSync(filePath)) {
+    res.sendFile(filePath);
+  } else {
+    res.status(404).send('Thumbnail non trovata');
+  }
+});
+
+// Eliminazione video
+app.delete('/api/timelapse/video/:filename', requireAuth, (req, res) => {
+  const filename = path.basename(req.params.filename);
+  timelapse.deleteVideo(filename);
+  res.json({ success: true });
+});
+
 // ─── Proxy stream MJPEG dinamico (protetto da auth) ───────────────────────────
+
 
 function createStreamProxy() {
   return (req, res) => {

@@ -1,5 +1,8 @@
 FROM node:20-alpine
 
+# Installa ffmpeg per la generazione dei timelapse
+RUN apk add --no-cache ffmpeg
+
 WORKDIR /usr/src/app
 
 # Copia dipendenze e installa

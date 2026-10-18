@@ -49,6 +49,17 @@
         <span id="reorderText">Riordina</span>
       </button>
 
+      <!-- Pulsante Timelapse -->
+      <button class="btn-action btn-timelapse" id="btnTimelapse" title="Gestione Timelapse Multi-Camera">
+        <span class="rec-dot" id="headerRecDot" style="display: none;"></span>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="10"></circle>
+          <polygon points="10 8 16 12 10 16 10 8"></polygon>
+        </svg>
+        <span id="timelapseBtnText">Timelapse</span>
+      </button>
+
+
       <!-- Stato go2rtc -->
       <div class="server-status" id="serverStatus" title="Stato server go2rtc">
         <div class="status-dot" id="statusDot"></div>
@@ -135,7 +146,114 @@
     </div>
   </div>
 
+  <!-- ── Modale Timelapse Multi-Camera ────────────────────────── -->
+  <div class="modal-backdrop" id="timelapseModal" aria-hidden="true">
+    <div class="modal-card modal-timelapse">
+      <div class="modal-header">
+        <h3>🎬 Timelapse Multi-Camera</h3>
+        <button type="button" class="btn-close-modal" id="btnCloseTimelapseModal">&times;</button>
+      </div>
+
+      <!-- Stato Registrazione Attiva -->
+      <div class="timelapse-active-panel" id="timelapseActivePanel" style="display: none;">
+        <div class="rec-live-indicator">
+          <span class="rec-live-pulse"></span>
+          <span class="rec-live-text">REGISTRAZIONE IN CORSO</span>
+        </div>
+        <div class="timelapse-live-stats">
+          <div class="stat-box">
+            <span class="stat-label">DURATA</span>
+            <span class="stat-value" id="tlLiveDuration">00:00:00</span>
+          </div>
+          <div class="stat-box">
+            <span class="stat-label">FRAME CATTURATI</span>
+            <span class="stat-value" id="tlLiveFrames">0</span>
+          </div>
+          <div class="stat-box">
+            <span class="stat-label">INTERVALLO</span>
+            <span class="stat-value" id="tlLiveInterval">10s</span>
+          </div>
+        </div>
+        <p class="timelapse-live-hint">La registrazione prosegue in background sul NAS anche se chiudi il browser.</p>
+        <button type="button" class="btn-stop-timelapse" id="btnStopTimelapse">
+          ⏹️ Ferma & Genera Video
+        </button>
+      </div>
+
+      <!-- Stato Elaborazione Video (FFmpeg) -->
+      <div class="timelapse-compiling-panel" id="timelapseCompilingPanel" style="display: none;">
+        <div class="loader-ring"></div>
+        <h4>Elaborazione video FFmpeg in corso...</h4>
+        <p>Assemblaggio delle prospettive con inquadratura e pan personalizzati. Attendere qualche istante.</p>
+      </div>
+
+      <!-- Form Avvio Registrazione -->
+      <div class="timelapse-setup-panel" id="timelapseSetupPanel">
+        <form id="timelapseStartForm">
+          <div class="form-row">
+            <div class="form-group">
+              <label for="tlInterval">Intervallo di Scatto</label>
+              <select id="tlInterval">
+                <option value="5">Ogni 5 secondi (Stampe brevi/veloci)</option>
+                <option value="10" selected>Ogni 10 secondi (Raccomandato)</option>
+                <option value="30">Ogni 30 secondi (Stampe medie 4-8h)</option>
+                <option value="60">Ogni 60 secondi (Stampe lunghe 12h+)</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label for="tlFps">Framerate Video Finale</label>
+              <select id="tlFps">
+                <option value="24">24 FPS (Cinematico)</option>
+                <option value="30" selected>30 FPS (Fluido - Standard)</option>
+                <option value="60">60 FPS (Super Fluido)</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label>Telecamere da Includere (in ordine di visualizzazione)</label>
+            <div class="timelapse-cam-checkboxes" id="timelapseCamList">
+              <!-- Checkbox generate dinamicamente in ordine -->
+            </div>
+          </div>
+
+          <button type="submit" class="btn-start-timelapse" id="btnStartTimelapse">
+            🔴 Avvia Nuovo Timelapse
+          </button>
+        </form>
+      </div>
+
+      <!-- Galleria / Archivio Video Generati -->
+      <div class="timelapse-archive-section">
+        <div class="archive-header">
+          <h4>Video Salvati sul NAS</h4>
+          <span class="archive-count" id="tlArchiveCount">0 video</span>
+        </div>
+        <div class="timelapse-video-list" id="timelapseVideoList">
+          <!-- Lista video caricati dinamicamente -->
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Modale Video Player Integrato ───────────────────────── -->
+  <div class="modal-backdrop" id="videoPlayerModal" aria-hidden="true">
+    <div class="modal-card modal-player">
+      <div class="modal-header">
+        <h3 id="playerModalTitle">Riproduzione Timelapse</h3>
+        <button type="button" class="btn-close-modal" id="btnClosePlayerModal">&times;</button>
+      </div>
+      <div class="player-container">
+        <video id="timelapseVideoPlayer" controls autoplay playsinline></video>
+      </div>
+      <div class="player-footer">
+        <a id="btnDownloadPlayerVideo" class="btn-modal-save" download>⬇️ Scarica MP4</a>
+      </div>
+    </div>
+  </div>
+
   <!-- ── Footer ────────────────────────────────────────────── -->
+
   <footer class="footer">
     <span class="footer-clock" id="clock" aria-label="Ora corrente"></span>
     <span class="footer-info">PrintCam &mdash; Synology NAS</span>
