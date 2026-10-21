@@ -817,6 +817,38 @@ function toggleFullscreen(el) {
 let timelapsePollTimer = null;
 let currentTimelapseStatus = null;
 
+function calculateTargetTimeMs(timeStr) {
+  if (!timeStr) return null;
+  const parts = timeStr.split(':').map(Number);
+  if (parts.length < 2 || isNaN(parts[0]) || isNaN(parts[1])) return null;
+  const target = new Date();
+  target.setHours(parts[0], parts[1], 0, 0);
+  if (target.getTime() <= Date.now()) {
+    target.setDate(target.getDate() + 1);
+  }
+  return target.getTime();
+}
+
+function updateScheduleHint(timeStr) {
+  const hintEl = document.getElementById('tlScheduleTargetHint');
+  if (!hintEl) return;
+  if (!timeStr) {
+    hintEl.textContent = 'Arresto previsto: --:--';
+    return;
+  }
+  const targetMs = calculateTargetTimeMs(timeStr);
+  if (!targetMs) return;
+
+  const diffMs = targetMs - Date.now();
+  const diffH = Math.floor(diffMs / (1000 * 60 * 60));
+  const diffM = Math.floor((diffMs % (1000 * 60 * 60)) / (1000 * 60));
+  const targetDate = new Date(targetMs);
+  const isTomorrow = targetDate.getDate() !== new Date().getDate();
+  const dayPrefix = isTomorrow ? 'Domani' : 'Oggi';
+
+  hintEl.textContent = `Arresto previsto: ${dayPrefix} alle ${timeStr} (tra ${diffH}h ${diffM}m)`;
+}
+
 function initTimelapseUI() {
   const btnTimelapse = document.getElementById('btnTimelapse');
   const modal = document.getElementById('timelapseModal');
@@ -828,6 +860,85 @@ function initTimelapseUI() {
   const playerModal = document.getElementById('videoPlayerModal');
   const btnClosePlayer = document.getElementById('btnClosePlayerModal');
   const videoPlayer = document.getElementById('timelapseVideoPlayer');
+
+  // Toggle & input avanzati (Setup)
+  const enableScheduleCb = document.getElementById('tlEnableSchedule');
+  const scheduleDetails = document.getElementById('tlScheduleDetails');
+  const scheduleTimeInput = document.getElementById('tlScheduleTime');
+  const enableMotionCb = document.getElementById('tlEnableMotionStop');
+  const motionDetails = document.getElementById('tlMotionDetails');
+
+  // Pulsanti Live (Active Panel)
+  const btnCancelLiveSchedule = document.getElementById('btnCancelLiveSchedule');
+  const btnToggleLiveMotion = document.getElementById('btnToggleLiveMotion');
+
+  if (enableScheduleCb) {
+    enableScheduleCb.addEventListener('change', () => {
+      scheduleDetails.style.display = enableScheduleCb.checked ? 'block' : 'none';
+      if (enableScheduleCb.checked && !scheduleTimeInput.value) {
+        // Pre-imposta orario a +2 ore da adesso
+        const d = new Date(Date.now() + 2 * 3600 * 1000);
+        const hh = String(d.getHours()).padStart(2, '0');
+        const mm = String(d.getMinutes()).padStart(2, '0');
+        scheduleTimeInput.value = `${hh}:${mm}`;
+      }
+      updateScheduleHint(scheduleTimeInput.value);
+    });
+  }
+
+  if (scheduleTimeInput) {
+    scheduleTimeInput.addEventListener('input', () => {
+      updateScheduleHint(scheduleTimeInput.value);
+    });
+  }
+
+  // Pulsanti rapidi +1h, +2h, +4h, +8h
+  document.querySelectorAll('.btn-time-quick').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const addHours = parseInt(btn.dataset.addHours, 10) || 1;
+      const d = new Date(Date.now() + addHours * 3600 * 1000);
+      const hh = String(d.getHours()).padStart(2, '0');
+      const mm = String(d.getMinutes()).padStart(2, '0');
+      if (scheduleTimeInput) {
+        scheduleTimeInput.value = `${hh}:${mm}`;
+        updateScheduleHint(scheduleTimeInput.value);
+      }
+    });
+  });
+
+  if (enableMotionCb) {
+    enableMotionCb.addEventListener('change', () => {
+      motionDetails.style.display = enableMotionCb.checked ? 'block' : 'none';
+    });
+  }
+
+  if (btnCancelLiveSchedule) {
+    btnCancelLiveSchedule.addEventListener('click', async () => {
+      if (!confirm('Vuoi annullare l\'orario programmato di stop?')) return;
+      try {
+        await fetch('/api/timelapse/update', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ scheduledStopTimeMs: null, scheduledTimeStr: null })
+        });
+        checkTimelapseStatus();
+      } catch (_) {}
+    });
+  }
+
+  if (btnToggleLiveMotion) {
+    btnToggleLiveMotion.addEventListener('click', async () => {
+      const nextVal = !(currentTimelapseStatus && currentTimelapseStatus.stopOnNoMotion);
+      try {
+        await fetch('/api/timelapse/update', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ stopOnNoMotion: nextVal })
+        });
+        checkTimelapseStatus();
+      } catch (_) {}
+    });
+  }
 
   btnTimelapse.addEventListener('click', () => {
     openTimelapseModal();
@@ -864,11 +975,31 @@ function initTimelapseUI() {
       return;
     }
 
+    // Opzioni avanzate (Arresto programmato e Inattività)
+    let scheduledStopTimeMs = null;
+    let scheduledTimeStr = null;
+    if (enableScheduleCb && enableScheduleCb.checked && scheduleTimeInput && scheduleTimeInput.value) {
+      scheduledTimeStr = scheduleTimeInput.value;
+      scheduledStopTimeMs = calculateTargetTimeMs(scheduledTimeStr);
+    }
+
+    const stopOnNoMotion = !!(enableMotionCb && enableMotionCb.checked);
+    const motionThresholdEl = document.getElementById('tlMotionThreshold');
+    const motionThreshold = motionThresholdEl ? parseInt(motionThresholdEl.value, 10) || 6 : 6;
+
     try {
       const res = await fetch('/api/timelapse/start', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ interval, fps, cameraIds })
+        body: JSON.stringify({
+          interval,
+          fps,
+          cameraIds,
+          scheduledStopTimeMs,
+          scheduledTimeStr,
+          stopOnNoMotion,
+          motionThreshold
+        })
       });
       const data = await res.json();
       if (data.success) {
@@ -881,7 +1012,7 @@ function initTimelapseUI() {
     }
   });
 
-  // Stop registrazione
+  // Stop registrazione manuale
   btnStop.addEventListener('click', async () => {
     if (!confirm('Vuoi fermare la registrazione e procedere con l\'assemblaggio del video combinato?')) return;
 
@@ -889,7 +1020,11 @@ function initTimelapseUI() {
     btnStop.textContent = 'Arresto in corso...';
 
     try {
-      const res = await fetch('/api/timelapse/stop', { method: 'POST' });
+      const res = await fetch('/api/timelapse/stop', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ reason: 'manual' })
+      });
       const data = await res.json();
       if (data.success) {
         checkTimelapseStatus();
@@ -906,7 +1041,7 @@ function initTimelapseUI() {
 
   // Controllo iniziale stato timelapse & polling periodico
   checkTimelapseStatus();
-  setInterval(checkTimelapseStatus, 4000);
+  setInterval(checkTimelapseStatus, 3000);
 }
 
 async function checkTimelapseStatus() {
@@ -949,6 +1084,36 @@ function renderTimelapseStatus(st) {
     document.getElementById('tlLiveDuration').textContent = formatDuration(st.elapsedSec);
     document.getElementById('tlLiveFrames').textContent = st.frameCount;
     document.getElementById('tlLiveInterval').textContent = `${st.interval}s`;
+
+    // Aggiorna stato visuale funzionalità live
+    const liveScheduleEl = document.getElementById('tlLiveScheduleStatus');
+    const liveScheduleVal = document.getElementById('tlLiveScheduleValue');
+    if (st.scheduledStopTimeMs) {
+      liveScheduleEl.style.display = 'flex';
+      const remainingMs = Math.max(0, st.scheduledStopTimeMs - Date.now());
+      const remH = Math.floor(remainingMs / (3600 * 1000));
+      const remM = Math.floor((remainingMs % (3600 * 1000)) / (60 * 1000));
+      const remS = Math.floor((remainingMs % (60 * 1000)) / 1000);
+      const remStr = remH > 0 ? `${remH}h ${remM}m` : `${remM}m ${remS}s`;
+      liveScheduleVal.textContent = `${st.scheduledTimeStr || 'Orario'} (tra ${remStr})`;
+    } else {
+      liveScheduleEl.style.display = 'none';
+    }
+
+    const liveMotionEl = document.getElementById('tlLiveMotionStatus');
+    const liveMotionVal = document.getElementById('tlLiveMotionValue');
+    if (st.stopOnNoMotion) {
+      liveMotionEl.style.display = 'flex';
+      const count = st.consecutiveStaticFrames || 0;
+      const th = st.motionThreshold || 6;
+      if (count > 0) {
+        liveMotionVal.textContent = `Scena ferma (${count}/${th} scatti identici)`;
+      } else {
+        liveMotionVal.textContent = `In movimento (${count}/${th} scatti identici)`;
+      }
+    } else {
+      liveMotionEl.style.display = 'none';
+    }
   } else {
     dot.style.display = 'none';
     btn.classList.remove('recording');
@@ -1027,10 +1192,19 @@ async function loadTimelapseArchive() {
 
       const camNames = v.cameras ? v.cameras.map(c => c.name).join(' + ') : 'Multi-cam';
 
+      let reasonBadge = '';
+      if (v.stopReason === 'no_motion') {
+        reasonBadge = '<span class="tl-reason-badge badge-motion">🏁 Stampa finita</span>';
+      } else if (v.stopReason === 'scheduled_time') {
+        reasonBadge = '<span class="tl-reason-badge badge-schedule">⏰ Orario</span>';
+      } else if (v.stopReason === 'manual') {
+        reasonBadge = '<span class="tl-reason-badge badge-manual">⏹️ Manuale</span>';
+      }
+
       item.innerHTML = `
         <img class="tl-video-thumb" src="/api/timelapse/thumbnail/${v.thumbnail}" onerror="this.style.display='none'" alt="Anteprima" />
         <div class="tl-video-info">
-          <div class="tl-video-title">${dateStr}</div>
+          <div class="tl-video-title">${dateStr} ${reasonBadge}</div>
           <div class="tl-video-meta">${v.durationSec}s • ${v.frameCount} frame • ${v.fileSizeMB} MB • ${camNames}</div>
         </div>
         <div class="tl-video-actions">

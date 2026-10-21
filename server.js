@@ -358,7 +358,15 @@ app.get('/api/timelapse/status', requireAuth, (req, res) => {
 // Avvia registrazione timelapse
 app.post('/api/timelapse/start', requireAuth, (req, res) => {
   try {
-    const { interval, fps, cameraIds } = req.body;
+    const {
+      interval,
+      fps,
+      cameraIds,
+      scheduledStopTimeMs,
+      scheduledTimeStr,
+      stopOnNoMotion,
+      motionThreshold
+    } = req.body;
     const allCameras = loadCameras();
 
     // Seleziona solo le telecamere richieste, mantenendo l'ordine da cameras.json
@@ -375,9 +383,29 @@ app.post('/api/timelapse/start', requireAuth, (req, res) => {
       interval: interval || 10,
       fps: fps || 30,
       selectedCameras,
-      go2rtcUrl: GO2RTC_URL
+      go2rtcUrl: GO2RTC_URL,
+      scheduledStopTimeMs,
+      scheduledTimeStr,
+      stopOnNoMotion,
+      motionThreshold
     });
 
+    res.json({ success: true, status });
+  } catch (err) {
+    res.status(400).json({ success: false, message: err.message });
+  }
+});
+
+// Modifica impostazioni timelapse in corso d'opera (stop orario, inattività)
+app.post('/api/timelapse/update', requireAuth, (req, res) => {
+  try {
+    const { scheduledStopTimeMs, scheduledTimeStr, stopOnNoMotion, motionThreshold } = req.body;
+    const status = timelapse.updateSettings({
+      scheduledStopTimeMs,
+      scheduledTimeStr,
+      stopOnNoMotion,
+      motionThreshold
+    });
     res.json({ success: true, status });
   } catch (err) {
     res.status(400).json({ success: false, message: err.message });
@@ -387,7 +415,8 @@ app.post('/api/timelapse/start', requireAuth, (req, res) => {
 // Ferma registrazione e avvia assemblaggio video FFmpeg
 app.post('/api/timelapse/stop', requireAuth, async (req, res) => {
   try {
-    const result = await timelapse.stop();
+    const reason = req.body && req.body.reason ? req.body.reason : 'manual';
+    const result = await timelapse.stop(reason);
     res.json(result);
   } catch (err) {
     res.status(400).json({ success: false, message: err.message });

@@ -52,10 +52,17 @@ let state = {
   cameras: [],  // telecamere incluse con relativo fitMode e panX/panY
   frameCount: 0,
   compilingProgress: 0,
-  lastError: null
+  lastError: null,
+  scheduledStopTimeMs: null,  // timestamp epoch ms per arresto programmato
+  scheduledTimeStr: null,     // stringa visuale dell'orario (es. "18:30")
+  stopOnNoMotion: false,      // flag abilitazione arresto su inattività
+  motionThreshold: 6,         // numero di frame statici consecutivi necessari per lo stop
+  consecutiveStaticFrames: 0, // contatore attuale di frame consecutivi senza movimento
+  stopReason: null            // 'manual' | 'scheduled_time' | 'no_motion'
 };
 
 let captureTimer = null;
+let secondTicker = null; // ticker al secondo per orario programmato
 let lastGoodFrames = {}; // cache dell'ultimo frame valido per camera
 
 // ─── Gestione Metadata ────────────────────────────────────────────────────────
@@ -99,6 +106,67 @@ function fetchSnapshot(go2rtcUrl, camId) {
   });
 }
 
+// ─── Comparazione Frame per Rilevamento Inattività (Stampa Finita) ───────────
+
+function compareFrames(prevPath, currPath, prevBuf, currBuf) {
+  return new Promise((resolve) => {
+    // 1. Controllo immediato uguaglianza binaria (0ms)
+    if (prevBuf && currBuf && prevBuf.equals(currBuf)) {
+      return resolve({ isStatic: true, score: 999, method: 'binary_equal' });
+    }
+
+    // 2. Controllo tramite FFmpeg PSNR (Peak Signal-to-Noise Ratio)
+    if (fs.existsSync(prevPath) && fs.existsSync(currPath)) {
+      const proc = spawn('ffmpeg', [
+        '-loglevel', 'error',
+        '-i', prevPath,
+        '-i', currPath,
+        '-filter_complex', 'psnr',
+        '-f', 'null',
+        '-'
+      ], { timeout: 3500 });
+
+      let stderr = '';
+      proc.stderr.on('data', d => { stderr += d.toString(); });
+
+      proc.on('close', code => {
+        if (code === 0 || stderr.includes('average:')) {
+          const match = stderr.match(/average:([0-9.]+|inf)/i);
+          if (match) {
+            if (match[1].toLowerCase() === 'inf') {
+              return resolve({ isStatic: true, score: 999, method: 'psnr_inf' });
+            }
+            const val = parseFloat(match[1]);
+            // PSNR >= 37.0 dB corrisponde a scena visivamente statica con solo rumore di fondo/sensore
+            const isStatic = !isNaN(val) && val >= 37.0;
+            return resolve({ isStatic, score: val, method: 'psnr' });
+          }
+        }
+        // Fallback su confronto dimensionale buffer
+        resolve(bufferDiffFallback(prevBuf, currBuf));
+      });
+
+      proc.on('error', () => {
+        resolve(bufferDiffFallback(prevBuf, currBuf));
+      });
+      return;
+    }
+
+    resolve(bufferDiffFallback(prevBuf, currBuf));
+  });
+}
+
+function bufferDiffFallback(prevBuf, currBuf) {
+  if (!prevBuf || !currBuf) return { isStatic: false, score: 0, method: 'fallback_none' };
+  if (prevBuf.equals(currBuf)) return { isStatic: true, score: 999, method: 'fallback_equal' };
+
+  // Differenza di dimensione JPEG inferiore allo 0.4%
+  const diff = Math.abs(prevBuf.length - currBuf.length);
+  const maxLen = Math.max(prevBuf.length, currBuf.length);
+  const ratio = diff / maxLen;
+  return { isStatic: ratio < 0.004, score: ratio, method: 'fallback_ratio' };
+}
+
 // ─── Loop Periodico di Registrazione ──────────────────────────────────────────
 
 async function captureFrameTick(go2rtcUrl) {
@@ -106,17 +174,25 @@ async function captureFrameTick(go2rtcUrl) {
 
   const currentFrameIdx = state.frameCount + 1;
   const frameName = `frame_${String(currentFrameIdx).padStart(6, '0')}.jpg`;
+  const prevFrameName = currentFrameIdx > 1
+    ? `frame_${String(currentFrameIdx - 1).padStart(6, '0')}.jpg`
+    : null;
+
+  let allCamerasStatic = (currentFrameIdx > 1);
 
   for (const cam of state.cameras) {
     const camDir = path.join(SESSIONS_DIR, state.sessionId, cam.id);
     const destPath = path.join(camDir, frameName);
+    const prevPath = prevFrameName ? path.join(camDir, prevFrameName) : null;
 
     let buf = await fetchSnapshot(go2rtcUrl, cam.id);
+    const prevBuf = lastGoodFrames[cam.id];
+
     if (buf && buf.length > 500) {
       lastGoodFrames[cam.id] = buf;
-    } else if (lastGoodFrames[cam.id]) {
+    } else if (prevBuf) {
       // Se il frame attuale è fallito, usa l'ultimo buono per non desincronizzare
-      buf = lastGoodFrames[cam.id];
+      buf = prevBuf;
     }
 
     if (buf) {
@@ -125,15 +201,53 @@ async function captureFrameTick(go2rtcUrl) {
       } catch (err) {
         console.error(`[TIMELAPSE] Errore scrittura frame ${cam.id}:`, err.message);
       }
+
+      // Se il rilevamento inattività è attivo ed esiste un frame precedente per questa camera
+      if (state.stopOnNoMotion && prevPath && fs.existsSync(prevPath)) {
+        const comp = await compareFrames(prevPath, destPath, prevBuf, buf);
+        if (!comp.isStatic) {
+          allCamerasStatic = false;
+        }
+      } else if (state.stopOnNoMotion && !prevPath) {
+        allCamerasStatic = false;
+      }
     }
   }
 
   state.frameCount = currentFrameIdx;
+
+  // Controllo arresto automatico su inattività (frame identici)
+  if (state.stopOnNoMotion && currentFrameIdx > 1) {
+    if (allCamerasStatic) {
+      state.consecutiveStaticFrames++;
+      console.log(`[TIMELAPSE] Fotogramma statico rilevato (${state.consecutiveStaticFrames}/${state.motionThreshold})`);
+
+      if (state.consecutiveStaticFrames >= state.motionThreshold) {
+        console.log(`[TIMELAPSE] Raggiunta soglia inattività (${state.consecutiveStaticFrames} frame statici). Arresto automatico timelapse (stampa terminata)!`);
+        stop('no_motion').catch(err => console.error('[TIMELAPSE] Errore arresto no_motion:', err));
+        return;
+      }
+    } else {
+      if (state.consecutiveStaticFrames > 0) {
+        console.log(`[TIMELAPSE] Movimento rilevato. Reset contatore frame statici.`);
+      }
+      state.consecutiveStaticFrames = 0;
+    }
+  }
 }
 
 // ─── Avvio & Stop Timelapse ───────────────────────────────────────────────────
 
-function start({ interval = 10, fps = 30, selectedCameras, go2rtcUrl }) {
+function start({
+  interval = 10,
+  fps = 30,
+  selectedCameras,
+  go2rtcUrl,
+  scheduledStopTimeMs = null,
+  scheduledTimeStr = null,
+  stopOnNoMotion = false,
+  motionThreshold = 6
+}) {
   if (state.isRunning || state.isCompiling) {
     throw new Error('Un timelapse è già in corso o in fase di elaborazione');
   }
@@ -159,6 +273,12 @@ function start({ interval = 10, fps = 30, selectedCameras, go2rtcUrl }) {
   state.cameras = selectedCameras;
   state.frameCount = 0;
   state.lastError = null;
+  state.scheduledStopTimeMs = scheduledStopTimeMs ? parseInt(scheduledStopTimeMs, 10) : null;
+  state.scheduledTimeStr = scheduledTimeStr || null;
+  state.stopOnNoMotion = !!stopOnNoMotion;
+  state.motionThreshold = Math.max(2, parseInt(motionThreshold, 10) || 6);
+  state.consecutiveStaticFrames = 0;
+  state.stopReason = null;
 
   // Primo scatto immediato
   captureFrameTick(go2rtcUrl);
@@ -168,17 +288,67 @@ function start({ interval = 10, fps = 30, selectedCameras, go2rtcUrl }) {
     captureFrameTick(go2rtcUrl);
   }, state.interval * 1000);
 
-  console.log(`[TIMELAPSE] Avviato: ${sessionId} con ${selectedCameras.length} camere ogni ${state.interval}s`);
+  // Ticker al secondo per verificare con precisione l'orario programmato di arresto
+  if (secondTicker) clearInterval(secondTicker);
+  secondTicker = setInterval(() => {
+    if (!state.isRunning) return;
+
+    if (state.scheduledStopTimeMs && Date.now() >= state.scheduledStopTimeMs) {
+      console.log(`[TIMELAPSE] Raggiunto orario programmato di stop (${state.scheduledTimeStr || state.scheduledStopTimeMs}). Procedo con l'arresto...`);
+      stop('scheduled_time').catch(err => console.error('[TIMELAPSE] Errore arresto programmato:', err));
+    }
+  }, 1000);
+
+  console.log(`[TIMELAPSE] Avviato: ${sessionId} con ${selectedCameras.length} camere ogni ${state.interval}s | Stop orario: ${state.scheduledTimeStr || 'Nessuno'} | Stop inattività: ${state.stopOnNoMotion ? `Attivo (${state.motionThreshold} frame)` : 'Disattivato'}`);
   return getStatus();
 }
 
-async function stop() {
+function updateSettings({
+  scheduledStopTimeMs,
+  scheduledTimeStr,
+  stopOnNoMotion,
+  motionThreshold
+}) {
+  if (!state.isRunning) {
+    throw new Error('Nessun timelapse in corso da aggiornare');
+  }
+
+  if (scheduledStopTimeMs !== undefined) {
+    state.scheduledStopTimeMs = scheduledStopTimeMs ? parseInt(scheduledStopTimeMs, 10) : null;
+    state.scheduledTimeStr = scheduledTimeStr || null;
+  }
+
+  if (stopOnNoMotion !== undefined) {
+    state.stopOnNoMotion = !!stopOnNoMotion;
+    if (!state.stopOnNoMotion) {
+      state.consecutiveStaticFrames = 0;
+    }
+  }
+
+  if (motionThreshold !== undefined) {
+    state.motionThreshold = Math.max(2, parseInt(motionThreshold, 10) || 6);
+  }
+
+  console.log('[TIMELAPSE] Impostazioni aggiornate al volo:', {
+    scheduledTimeStr: state.scheduledTimeStr,
+    stopOnNoMotion: state.stopOnNoMotion,
+    motionThreshold: state.motionThreshold
+  });
+
+  return getStatus();
+}
+
+async function stop(reason = 'manual') {
   if (!state.isRunning) {
     throw new Error('Nessun timelapse in corso');
   }
 
   clearInterval(captureTimer);
   captureTimer = null;
+  if (secondTicker) {
+    clearInterval(secondTicker);
+    secondTicker = null;
+  }
   state.isRunning = false;
 
   const currentSessionId = state.sessionId;
@@ -186,6 +356,7 @@ async function stop() {
   const fps = state.fps;
   const frameCount = state.frameCount;
   const startedAt = state.startedAt;
+  const stopReason = reason;
 
   if (frameCount < 2) {
     // Troppi pochi fotogrammi, elimina sessione
@@ -197,7 +368,7 @@ async function stop() {
   }
 
   state.isCompiling = true;
-  console.log(`[TIMELAPSE] Arresto sessione ${currentSessionId}. Avvio assemblaggio FFmpeg (${frameCount} frame)...`);
+  console.log(`[TIMELAPSE] Arresto sessione ${currentSessionId} (Motivo: ${stopReason}). Avvio assemblaggio FFmpeg (${frameCount} frame)...`);
 
   // Esegui la compilazione FFmpeg asincrona
   compileTimelapseVideo({
@@ -205,7 +376,8 @@ async function stop() {
     cameras: currentCameras,
     fps,
     frameCount,
-    startedAt
+    startedAt,
+    stopReason
   }).catch(err => {
     console.error('[TIMELAPSE] Errore durante compilazione video:', err);
     state.lastError = err.message;
@@ -213,7 +385,7 @@ async function stop() {
     resetState();
   });
 
-  return { success: true, message: 'Elaborazione video avviata', sessionId: currentSessionId };
+  return { success: true, message: 'Elaborazione video avviata', sessionId: currentSessionId, stopReason };
 }
 
 function resetState() {
@@ -222,12 +394,17 @@ function resetState() {
   state.sessionId = null;
   state.startedAt = null;
   state.frameCount = 0;
+  state.scheduledStopTimeMs = null;
+  state.scheduledTimeStr = null;
+  state.stopOnNoMotion = false;
+  state.consecutiveStaticFrames = 0;
+  state.stopReason = null;
   lastGoodFrames = {};
 }
 
 // ─── Assemblaggio Video FFmpeg Multi-Prospettiva ───────────────────────────────
 
-function compileTimelapseVideo({ sessionId, cameras, fps, frameCount, startedAt }) {
+function compileTimelapseVideo({ sessionId, cameras, fps, frameCount, startedAt, stopReason }) {
   return new Promise((resolve, reject) => {
     const sessionDir = path.join(SESSIONS_DIR, sessionId);
     const outputFilename = `${sessionId}.mp4`;
@@ -331,6 +508,7 @@ function compileTimelapseVideo({ sessionId, cameras, fps, frameCount, startedAt 
           frameCount,
           fps,
           fileSizeMB,
+          stopReason: stopReason || 'manual',
           cameras: cameras.map(c => ({ id: c.id, name: c.name, fitMode: c.fitMode, panX: c.panX, panY: c.panY }))
         });
         saveMetadata(list);
@@ -342,7 +520,7 @@ function compileTimelapseVideo({ sessionId, cameras, fps, frameCount, startedAt 
           console.warn('[TIMELAPSE] Impossibile eliminare cartella temporanea:', e.message);
         }
 
-        resolve({ success: true, filename: outputFilename });
+        resolve({ success: true, filename: outputFilename, stopReason });
       } else {
         console.error(`[TIMELAPSE] Errore FFmpeg (codice ${code}):\n`, stderr.slice(-800));
         reject(new Error(`Errore durante l'assemblaggio del video (FFmpeg code ${code})`));
@@ -372,6 +550,12 @@ function getStatus() {
     fps: state.fps,
     frameCount: state.frameCount,
     cameras: state.cameras.map(c => ({ id: c.id, name: c.name })),
+    scheduledStopTimeMs: state.scheduledStopTimeMs,
+    scheduledTimeStr: state.scheduledTimeStr,
+    stopOnNoMotion: state.stopOnNoMotion,
+    motionThreshold: state.motionThreshold,
+    consecutiveStaticFrames: state.consecutiveStaticFrames,
+    stopReason: state.stopReason,
     lastError: state.lastError
   };
 }
@@ -400,6 +584,7 @@ function deleteVideo(filename) {
 
 module.exports = {
   start,
+  updateSettings,
   stop,
   getStatus,
   listVideos,
