@@ -1106,10 +1106,13 @@ function renderTimelapseStatus(st) {
       liveMotionEl.style.display = 'flex';
       const count = st.consecutiveStaticFrames || 0;
       const th = st.motionThreshold || 6;
+      const scoreStr = typeof st.lastMotionScore === 'number' ? ` (mov: ${st.lastMotionScore.toFixed(1)})` : '';
       if (count > 0) {
-        liveMotionVal.textContent = `Scena ferma (${count}/${th} scatti identici)`;
+        liveMotionVal.textContent = `Scena ferma: ${count}/${th} scatti identici${scoreStr}`;
+        liveMotionVal.style.color = '#4ade80';
       } else {
-        liveMotionVal.textContent = `In movimento (${count}/${th} scatti identici)`;
+        liveMotionVal.textContent = `In movimento: 0/${th} scatti identici${scoreStr}`;
+        liveMotionVal.style.color = '#f87171';
       }
     } else {
       liveMotionEl.style.display = 'none';

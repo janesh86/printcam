@@ -58,12 +58,14 @@ let state = {
   stopOnNoMotion: false,      // flag abilitazione arresto su inattività
   motionThreshold: 6,         // numero di frame statici consecutivi necessari per lo stop
   consecutiveStaticFrames: 0, // contatore attuale di frame consecutivi senza movimento
+  lastMotionScore: 0,         // punteggio di movimento dell'ultimo tick (0.0 = fermo)
   stopReason: null            // 'manual' | 'scheduled_time' | 'no_motion'
 };
 
 let captureTimer = null;
 let secondTicker = null; // ticker al secondo per orario programmato
 let lastGoodFrames = {}; // cache dell'ultimo frame valido per camera
+let lastThumbs32 = {};   // cache thumbnail 32x32 per comparazione movimento pixel-by-pixel
 
 // ─── Gestione Metadata ────────────────────────────────────────────────────────
 
@@ -106,65 +108,58 @@ function fetchSnapshot(go2rtcUrl, camId) {
   });
 }
 
-// ─── Comparazione Frame per Rilevamento Inattività (Stampa Finita) ───────────
+// ─── Estrazione & Comparazione Movimento 32x32 Grayscale ────────────────────
 
-function compareFrames(prevPath, currPath, prevBuf, currBuf) {
+function getFrame32x32(filePath) {
   return new Promise((resolve) => {
-    // 1. Controllo immediato uguaglianza binaria (0ms)
-    if (prevBuf && currBuf && prevBuf.equals(currBuf)) {
-      return resolve({ isStatic: true, score: 999, method: 'binary_equal' });
-    }
+    if (!fs.existsSync(filePath)) return resolve(null);
 
-    // 2. Controllo tramite FFmpeg PSNR (Peak Signal-to-Noise Ratio)
-    if (fs.existsSync(prevPath) && fs.existsSync(currPath)) {
-      const proc = spawn('ffmpeg', [
-        '-loglevel', 'error',
-        '-i', prevPath,
-        '-i', currPath,
-        '-filter_complex', 'psnr',
-        '-f', 'null',
-        '-'
-      ], { timeout: 3500 });
+    const proc = spawn('ffmpeg', [
+      '-loglevel', 'error',
+      '-i', filePath,
+      '-vf', 'scale=32:32,format=gray',
+      '-f', 'rawvideo',
+      '-'
+    ], { timeout: 3500 });
 
-      let stderr = '';
-      proc.stderr.on('data', d => { stderr += d.toString(); });
+    const chunks = [];
+    proc.stdout.on('data', chunk => chunks.push(chunk));
 
-      proc.on('close', code => {
-        if (code === 0 || stderr.includes('average:')) {
-          const match = stderr.match(/average:([0-9.]+|inf)/i);
-          if (match) {
-            if (match[1].toLowerCase() === 'inf') {
-              return resolve({ isStatic: true, score: 999, method: 'psnr_inf' });
-            }
-            const val = parseFloat(match[1]);
-            // PSNR >= 37.0 dB corrisponde a scena visivamente statica con solo rumore di fondo/sensore
-            const isStatic = !isNaN(val) && val >= 37.0;
-            return resolve({ isStatic, score: val, method: 'psnr' });
-          }
+    proc.on('close', code => {
+      if (code === 0) {
+        const buf = Buffer.concat(chunks);
+        if (buf.length === 1024) {
+          return resolve(buf);
         }
-        // Fallback su confronto dimensionale buffer
-        resolve(bufferDiffFallback(prevBuf, currBuf));
-      });
+      }
+      resolve(null);
+    });
 
-      proc.on('error', () => {
-        resolve(bufferDiffFallback(prevBuf, currBuf));
-      });
-      return;
-    }
-
-    resolve(bufferDiffFallback(prevBuf, currBuf));
+    proc.on('error', () => {
+      resolve(null);
+    });
   });
 }
 
-function bufferDiffFallback(prevBuf, currBuf) {
-  if (!prevBuf || !currBuf) return { isStatic: false, score: 0, method: 'fallback_none' };
-  if (prevBuf.equals(currBuf)) return { isStatic: true, score: 999, method: 'fallback_equal' };
+function computeMotionScore(thumbA, thumbB) {
+  if (!thumbA || !thumbB || thumbA.length !== 1024 || thumbB.length !== 1024) return 999;
+  let diff = 0;
+  for (let i = 0; i < 1024; i++) {
+    diff += Math.abs(thumbA[i] - thumbB[i]);
+  }
+  return diff / 1024; // Differenza media per pixel su scala 0-255
+}
 
-  // Differenza di dimensione JPEG inferiore allo 0.4%
-  const diff = Math.abs(prevBuf.length - currBuf.length);
-  const maxLen = Math.max(prevBuf.length, currBuf.length);
-  const ratio = diff / maxLen;
-  return { isStatic: ratio < 0.004, score: ratio, method: 'fallback_ratio' };
+function computeFallbackMotionScore(prevBuf, currBuf) {
+  if (!prevBuf || !currBuf) return 999;
+  if (prevBuf.equals(currBuf)) return 0;
+  const sampleCount = Math.min(prevBuf.length, currBuf.length, 2048);
+  const step = Math.floor(Math.min(prevBuf.length, currBuf.length) / sampleCount);
+  let diff = 0;
+  for (let i = 0; i < sampleCount; i++) {
+    diff += Math.abs(prevBuf[i * step] - currBuf[i * step]);
+  }
+  return (diff / sampleCount) * 0.1;
 }
 
 // ─── Loop Periodico di Registrazione ──────────────────────────────────────────
@@ -174,16 +169,14 @@ async function captureFrameTick(go2rtcUrl) {
 
   const currentFrameIdx = state.frameCount + 1;
   const frameName = `frame_${String(currentFrameIdx).padStart(6, '0')}.jpg`;
-  const prevFrameName = currentFrameIdx > 1
-    ? `frame_${String(currentFrameIdx - 1).padStart(6, '0')}.jpg`
-    : null;
 
-  let allCamerasStatic = (currentFrameIdx > 1);
+  let maxMotionScoreOnTick = 0;
+  let activeCamerasCount = 0;
+  let allActiveStatic = true;
 
   for (const cam of state.cameras) {
     const camDir = path.join(SESSIONS_DIR, state.sessionId, cam.id);
     const destPath = path.join(camDir, frameName);
-    const prevPath = prevFrameName ? path.join(camDir, prevFrameName) : null;
 
     let buf = await fetchSnapshot(go2rtcUrl, cam.id);
     const prevBuf = lastGoodFrames[cam.id];
@@ -191,7 +184,7 @@ async function captureFrameTick(go2rtcUrl) {
     if (buf && buf.length > 500) {
       lastGoodFrames[cam.id] = buf;
     } else if (prevBuf) {
-      // Se il frame attuale è fallito, usa l'ultimo buono per non desincronizzare
+      // Se il frame attuale è fallito, usa l'ultimo buono
       buf = prevBuf;
     }
 
@@ -202,15 +195,40 @@ async function captureFrameTick(go2rtcUrl) {
         console.error(`[TIMELAPSE] Errore scrittura frame ${cam.id}:`, err.message);
       }
 
-      // Se il rilevamento inattività è attivo ed esiste un frame precedente per questa camera
-      if (state.stopOnNoMotion && prevPath && fs.existsSync(prevPath)) {
-        const comp = await compareFrames(prevPath, destPath, prevBuf, buf);
-        if (!comp.isStatic) {
-          allCamerasStatic = false;
+      // Se il rilevamento inattività è attivo
+      if (state.stopOnNoMotion && currentFrameIdx > 1) {
+        const currThumb = await getFrame32x32(destPath);
+        const prevThumb = lastThumbs32[cam.id];
+
+        let motionScore = 0;
+        if (currThumb && prevThumb) {
+          motionScore = computeMotionScore(prevThumb, currThumb);
+        } else if (prevBuf && buf) {
+          motionScore = computeFallbackMotionScore(prevBuf, buf);
         }
-      } else if (state.stopOnNoMotion && !prevPath) {
-        allCamerasStatic = false;
+
+        if (currThumb) {
+          lastThumbs32[cam.id] = currThumb;
+        }
+
+        if (motionScore > maxMotionScoreOnTick) {
+          maxMotionScoreOnTick = motionScore;
+        }
+
+        // Soglia di movimento: <= 3.5 su scala 0-255 indica scena ferma (solo rumore sensore)
+        const isCamStatic = (motionScore <= 3.5);
+        console.log(`[TIMELAPSE] Camera "${cam.name}" - Variazione pixel: ${motionScore.toFixed(2)} (Statico: ${isCamStatic})`);
+
+        if (!isCamStatic) {
+          allActiveStatic = false;
+        }
+        activeCamerasCount++;
+      } else if (state.stopOnNoMotion && currentFrameIdx === 1) {
+        const firstThumb = await getFrame32x32(destPath);
+        if (firstThumb) lastThumbs32[cam.id] = firstThumb;
       }
+    } else {
+      console.warn(`[TIMELAPSE] Camera "${cam.name}" offline (nessun frame ricevuto). Ignorata per il calcolo del movimento.`);
     }
   }
 
@@ -218,18 +236,20 @@ async function captureFrameTick(go2rtcUrl) {
 
   // Controllo arresto automatico su inattività (frame identici)
   if (state.stopOnNoMotion && currentFrameIdx > 1) {
-    if (allCamerasStatic) {
+    state.lastMotionScore = maxMotionScoreOnTick;
+
+    if (activeCamerasCount > 0 && allActiveStatic) {
       state.consecutiveStaticFrames++;
-      console.log(`[TIMELAPSE] Fotogramma statico rilevato (${state.consecutiveStaticFrames}/${state.motionThreshold})`);
+      console.log(`[TIMELAPSE] ✅ Fotogramma statico rilevato (${state.consecutiveStaticFrames}/${state.motionThreshold}) - Variazione max: ${maxMotionScoreOnTick.toFixed(2)}`);
 
       if (state.consecutiveStaticFrames >= state.motionThreshold) {
-        console.log(`[TIMELAPSE] Raggiunta soglia inattività (${state.consecutiveStaticFrames} frame statici). Arresto automatico timelapse (stampa terminata)!`);
+        console.log(`[TIMELAPSE] 🏁 Raggiunta soglia inattività (${state.consecutiveStaticFrames} frame statici). Arresto automatico timelapse (stampa terminata)!`);
         stop('no_motion').catch(err => console.error('[TIMELAPSE] Errore arresto no_motion:', err));
         return;
       }
     } else {
       if (state.consecutiveStaticFrames > 0) {
-        console.log(`[TIMELAPSE] Movimento rilevato. Reset contatore frame statici.`);
+        console.log(`[TIMELAPSE] ⚠️ Movimento rilevato (variazione: ${maxMotionScoreOnTick.toFixed(2)}). Reset contatore frame statici.`);
       }
       state.consecutiveStaticFrames = 0;
     }
@@ -264,6 +284,7 @@ function start({
   });
 
   lastGoodFrames = {};
+  lastThumbs32 = {};
   state.isRunning = true;
   state.isCompiling = false;
   state.sessionId = sessionId;
@@ -278,6 +299,7 @@ function start({
   state.stopOnNoMotion = !!stopOnNoMotion;
   state.motionThreshold = Math.max(2, parseInt(motionThreshold, 10) || 6);
   state.consecutiveStaticFrames = 0;
+  state.lastMotionScore = 0;
   state.stopReason = null;
 
   // Primo scatto immediato
@@ -398,8 +420,10 @@ function resetState() {
   state.scheduledTimeStr = null;
   state.stopOnNoMotion = false;
   state.consecutiveStaticFrames = 0;
+  state.lastMotionScore = 0;
   state.stopReason = null;
   lastGoodFrames = {};
+  lastThumbs32 = {};
 }
 
 // ─── Assemblaggio Video FFmpeg Multi-Prospettiva ───────────────────────────────
@@ -410,7 +434,17 @@ function compileTimelapseVideo({ sessionId, cameras, fps, frameCount, startedAt,
     const outputFilename = `${sessionId}.mp4`;
     const outputPath = path.join(VIDEOS_DIR, outputFilename);
 
-    const N = cameras.length;
+    // Filtra solo le telecamere che hanno effettivamente fotogrammi validi su disco
+    const validCameras = cameras.filter(cam => {
+      const firstFrame = path.join(sessionDir, cam.id, 'frame_000001.jpg');
+      return fs.existsSync(firstFrame);
+    });
+
+    if (validCameras.length === 0) {
+      return reject(new Error('Nessuna telecamera attiva ha prodotto frame validi'));
+    }
+
+    const N = validCameras.length;
     // Calcolo dimensioni per ogni camera nel video combinato 1920x1080
     let W_slot = Math.floor(1920 / N);
     if (W_slot % 2 !== 0) W_slot -= 1; // H.264 richiede dimensioni pari
@@ -419,7 +453,7 @@ function compileTimelapseVideo({ sessionId, cameras, fps, frameCount, startedAt,
     const inputArgs = [];
     const filterParts = [];
 
-    cameras.forEach((cam, i) => {
+    validCameras.forEach((cam, i) => {
       const camDir = path.join(sessionDir, cam.id);
       inputArgs.push('-framerate', String(fps), '-i', path.join(camDir, 'frame_%06d.jpg'));
 
@@ -449,7 +483,7 @@ function compileTimelapseVideo({ sessionId, cameras, fps, frameCount, startedAt,
     if (N === 1) {
       filterParts.push(`[v0]scale=1920:1080,setsar=1[outv]`);
     } else {
-      const vInputs = cameras.map((_, i) => `[v${i}]`).join('');
+      const vInputs = validCameras.map((_, i) => `[v${i}]`).join('');
       filterParts.push(`${vInputs}hstack=inputs=${N},scale=1920:1080,setsar=1[outv]`);
     }
 
@@ -555,6 +589,7 @@ function getStatus() {
     stopOnNoMotion: state.stopOnNoMotion,
     motionThreshold: state.motionThreshold,
     consecutiveStaticFrames: state.consecutiveStaticFrames,
+    lastMotionScore: state.lastMotionScore,
     stopReason: state.stopReason,
     lastError: state.lastError
   };
