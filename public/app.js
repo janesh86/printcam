@@ -306,9 +306,9 @@ function renderCameras(cameras) {
             <button class="btn-pan btn-pan-down" data-dir="down" title="Sposta in basso">▼</button>
           </div>
           <div class="pan-zoom-row">
-            <button class="btn-pan btn-zoom-btn" data-action="zoom-out" title="Riduci ingrandimento (Zoom Out)">−</button>
-            <span class="zoom-level-text" title="Clicca per reimpostare 1.0x">${(typeof cam.zoom === 'number' ? cam.zoom : 1.0).toFixed(1)}x</span>
-            <button class="btn-pan btn-zoom-btn" data-action="zoom-in" title="Aumenta ingrandimento (Zoom In)">+</button>
+            <button class="btn-pan btn-zoom-btn btn-zoom-out" data-action="zoom-out" title="Riduci ingrandimento (Zoom Out)" ${(typeof cam.zoom === 'number' && cam.zoom > 1.0) ? '' : 'disabled'}>−</button>
+            <span class="zoom-level-text" title="Clicca per reimpostare 1.0x">${(typeof cam.zoom === 'number' ? Math.max(1.0, cam.zoom) : 1.0).toFixed(1)}x</span>
+            <button class="btn-pan btn-zoom-btn btn-zoom-in" data-action="zoom-in" title="Aumenta ingrandimento (Zoom In)" ${(typeof cam.zoom === 'number' && cam.zoom >= 3.0) ? 'disabled' : ''}>+</button>
           </div>
         </div>
         ` : ''}
@@ -502,10 +502,22 @@ function setupPanControl(cam, canvas, card) {
 
   let panX = typeof cam.panX === 'number' ? cam.panX : 50;
   let panY = typeof cam.panY === 'number' ? cam.panY : 50;
-  let zoom = typeof cam.zoom === 'number' ? cam.zoom : 1.0;
+  // In modalità Cover, il limite minimo è 1.0x (riempimento 100% per evitare bordi neri)
+  let zoom = typeof cam.zoom === 'number' ? Math.max(1.0, Math.min(3.0, cam.zoom)) : 1.0;
 
   const panPad = card.querySelector('.camera-pan-pad');
   const zoomText = panPad ? panPad.querySelector('.zoom-level-text') : null;
+  const btnZoomOut = panPad ? panPad.querySelector('.btn-zoom-out') : null;
+  const btnZoomIn = panPad ? panPad.querySelector('.btn-zoom-in') : null;
+
+  function updateZoomButtons() {
+    if (btnZoomOut) {
+      btnZoomOut.disabled = (zoom <= 1.0);
+    }
+    if (btnZoomIn) {
+      btnZoomIn.disabled = (zoom >= 3.0);
+    }
+  }
 
   function applyPanAndZoom() {
     canvas.style.setProperty('--pan-x', `${panX}%`);
@@ -514,6 +526,7 @@ function setupPanControl(cam, canvas, card) {
     if (zoomText) {
       zoomText.textContent = `${zoom.toFixed(1)}x`;
     }
+    updateZoomButtons();
     cam.panX = panX;
     cam.panY = panY;
     cam.zoom = zoom;
@@ -524,6 +537,7 @@ function setupPanControl(cam, canvas, card) {
   canvas.style.setProperty('--pan-x', `${panX}%`);
   canvas.style.setProperty('--pan-y', `${panY}%`);
   canvas.style.setProperty('--zoom', zoom);
+  updateZoomButtons();
 
   // Gestore D-Pad Overlay & Zoom Buttons
   if (panPad) {
@@ -554,7 +568,7 @@ function setupPanControl(cam, canvas, card) {
       } else if (action === 'zoom-in') {
         zoom = Math.min(3.0, Math.round((zoom + 0.1) * 10) / 10);
       } else if (action === 'zoom-out') {
-        zoom = Math.max(0.5, Math.round((zoom - 0.1) * 10) / 10);
+        zoom = Math.max(1.0, Math.round((zoom - 0.1) * 10) / 10);
       }
 
       applyPanAndZoom();
@@ -569,7 +583,7 @@ function setupPanControl(cam, canvas, card) {
       if (e.deltaY < 0) {
         zoom = Math.min(3.0, Math.round((zoom + 0.1) * 10) / 10);
       } else {
-        zoom = Math.max(0.5, Math.round((zoom - 0.1) * 10) / 10);
+        zoom = Math.max(1.0, Math.round((zoom - 0.1) * 10) / 10);
       }
       applyPanAndZoom();
     }, { passive: false });
@@ -595,7 +609,7 @@ function setupPanControl(cam, canvas, card) {
           e.touches[0].clientY - e.touches[1].clientY
         );
         const factor = currentDist / pinchStartDist;
-        zoom = Math.max(0.5, Math.min(3.0, Math.round(pinchStartZoom * factor * 10) / 10));
+        zoom = Math.max(1.0, Math.min(3.0, Math.round(pinchStartZoom * factor * 10) / 10));
         applyPanAndZoom();
       }
     }, { passive: true });

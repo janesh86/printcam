@@ -877,7 +877,10 @@ body {
 .camera-canvas.fit-cover {
   position: absolute;
   top: 50%; left: 50%;
-  transform: translate(-50%, -50%) scale(var(--zoom, 1));
+  transform: translate(
+    calc(-50% + (50% - var(--pan-x, 50%)) * (var(--zoom, 1) - 1)),
+    calc(-50% + (50% - var(--pan-y, 50%)) * (var(--zoom, 1) - 1))
+  ) scale(var(--zoom, 1));
   transform-origin: center center;
   min-width: 100%; min-height: 100%;
   width: auto; height: auto;
@@ -981,6 +984,11 @@ body {
 }
 .btn-pan:active {
   transform: scale(0.9);
+}
+.btn-pan:disabled, .btn-zoom-btn:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+  pointer-events: none;
 }
 .btn-pan-up { grid-column: 2; grid-row: 1; }
 .btn-pan-left { grid-column: 1; grid-row: 2; }

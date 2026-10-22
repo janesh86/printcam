@@ -244,7 +244,7 @@ app.post('/api/cameras', requireAuth, (req, res) => {
     fitMode: fitMode || 'contain',
     panX: typeof panX === 'number' ? panX : 50,
     panY: typeof panY === 'number' ? panY : 50,
-    zoom: typeof zoom === 'number' ? Math.max(0.5, Math.min(3.0, zoom)) : 1.0,
+    zoom: typeof zoom === 'number' ? Math.max(1.0, Math.min(3.0, zoom)) : 1.0,
     order: cameras.length + 1
   };
 
@@ -274,7 +274,7 @@ app.put('/api/cameras/:id', requireAuth, (req, res) => {
   if (panY !== undefined) cameras[idx].panY = typeof panY === 'number' ? panY : Number(panY);
   if (zoom !== undefined) {
     const z = typeof zoom === 'number' ? zoom : parseFloat(zoom);
-    cameras[idx].zoom = isNaN(z) ? 1.0 : Math.max(0.5, Math.min(3.0, Math.round(z * 10) / 10));
+    cameras[idx].zoom = isNaN(z) ? 1.0 : Math.max(1.0, Math.min(3.0, Math.round(z * 10) / 10));
   }
 
   saveCameras(cameras);

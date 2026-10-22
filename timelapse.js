@@ -460,7 +460,7 @@ function compileTimelapseVideo({ sessionId, cameras, fps, frameCount, startedAt,
       const fitMode = cam.fitMode || 'contain';
       const panX = typeof cam.panX === 'number' ? cam.panX : 50;
       const panY = typeof cam.panY === 'number' ? cam.panY : 50;
-      const zoom = typeof cam.zoom === 'number' && cam.zoom > 0 ? cam.zoom : 1.0;
+      const zoom = typeof cam.zoom === 'number' && cam.zoom >= 1.0 ? Math.min(3.0, cam.zoom) : 1.0;
 
       if (fitMode === 'cover') {
         let W_zoom = Math.round(W_slot * zoom);
@@ -468,20 +468,11 @@ function compileTimelapseVideo({ sessionId, cameras, fps, frameCount, startedAt,
         if (W_zoom % 2 !== 0) W_zoom += 1;
         if (H_zoom % 2 !== 0) H_zoom += 1;
 
-        if (zoom >= 1.0) {
-          // Ingrandimento: scala con fattore zoom e ritaglia centrando su panX/panY
-          filterParts.push(
-            `[${i}:v]scale=${W_zoom}:${H_zoom}:force_original_aspect_ratio=increase,` +
-            `crop=${W_slot}:${H_slot}:x='(in_w-out_w)*${panX}/100':y='(in_h-out_h)*${panY}/100',setsar=1[v${i}]`
-          );
-        } else {
-          // Zoom out: scala ridotta per mostrare più scena e padding nero per centrare
-          filterParts.push(
-            `[${i}:v]scale=${W_zoom}:${H_zoom}:force_original_aspect_ratio=increase,` +
-            `crop=${W_zoom}:${H_zoom}:x='(in_w-out_w)*${panX}/100':y='(in_h-out_h)*${panY}/100',` +
-            `pad=${W_slot}:${H_slot}:(ow-iw)/2:(oh-ih)/2:black,setsar=1[v${i}]`
-          );
-        }
+        // Ingrandimento / Cover pieno: scala con fattore zoom e ritaglia centrando su panX/panY (nessun bordo nero)
+        filterParts.push(
+          `[${i}:v]scale=${W_zoom}:${H_zoom}:force_original_aspect_ratio=increase,` +
+          `crop=${W_slot}:${H_slot}:x='(in_w-out_w)*${panX}/100':y='(in_h-out_h)*${panY}/100',setsar=1[v${i}]`
+        );
       } else if (fitMode === 'fill') {
         // Stira l'immagine per riempire l'intero slot
         filterParts.push(`[${i}:v]scale=${W_slot}:${H_slot},setsar=1[v${i}]`);
