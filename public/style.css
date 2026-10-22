@@ -445,8 +445,8 @@ body {
 .status-dot.online  { background: var(--live-color); box-shadow: 0 0 8px rgba(34, 197, 94, 0.6); }
 .status-dot.offline { background: var(--offline-color); }
 
-/* Selettore Dimensione Griglia Globale */
-.grid-size-selector {
+/* Selettore Layout Griglia nell'Header */
+.grid-layout-selector {
   display: flex;
   align-items: center;
   background: rgba(255, 255, 255, 0.05);
@@ -456,25 +456,25 @@ body {
   gap: 2px;
 }
 
-.btn-grid-size {
+.btn-layout-mode {
   background: transparent;
   border: none;
   color: var(--text-secondary);
   font-family: var(--font);
   font-size: 11px;
   font-weight: 700;
-  padding: 4px 8px;
+  padding: 5px 9px;
   border-radius: 6px;
   cursor: pointer;
   transition: all var(--transition);
 }
 
-.btn-grid-size:hover {
+.btn-layout-mode:hover {
   color: #fff;
   background: rgba(255, 255, 255, 0.08);
 }
 
-.btn-grid-size.active {
+.btn-layout-mode.active {
   background: var(--accent-cyan);
   color: #000;
   box-shadow: 0 0 10px rgba(0, 212, 255, 0.4);
@@ -507,29 +507,58 @@ body {
 .cameras-grid {
   flex: 1;
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(var(--grid-card-min, 500px), 1fr));
-  align-items: start;
   gap: 20px;
   padding: 20px 24px 24px;
   max-width: 1800px;
   margin: 0 auto;
   width: 100%;
+  align-items: start;
 }
 
-/* ── Dimensioni Schede Singole ───────────────────────────────── */
-.camera-card.size-1x {
-  grid-column: span 1;
-}
-.camera-card.size-2x {
-  grid-column: span 2;
-}
-.camera-card.size-full {
-  grid-column: 1 / -1;
+/* Modalità Griglia (Selezionabili nell'Header) */
+.cameras-grid.layout-cols-3,
+.cameras-grid:not([class*="layout-cols-"]) {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
-@media (max-width: 900px) {
-  .camera-card.size-2x {
-    grid-column: span 1;
+.cameras-grid.layout-cols-2 {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.cameras-grid.layout-cols-1 {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+/* Modalità Camera in Primo Piano (Focus / In Evidenza) */
+.cameras-grid.has-focused {
+  grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+}
+
+.cameras-grid.has-focused .camera-card.camera-focused {
+  grid-column: 1 / -1 !important;
+  order: -1 !important;
+  border-color: rgba(0, 212, 255, 0.45);
+  box-shadow: 0 0 35px rgba(0, 212, 255, 0.2), 0 16px 48px rgba(0,0,0,0.6);
+}
+
+.cameras-grid.has-focused .camera-card:not(.camera-focused) {
+  grid-column: span 1 !important;
+  order: 0 !important;
+}
+
+@media (max-width: 1100px) {
+  .cameras-grid.layout-cols-3 {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 768px) {
+  .cameras-grid,
+  .cameras-grid.layout-cols-3,
+  .cameras-grid.layout-cols-2,
+  .cameras-grid.layout-cols-1,
+  .cameras-grid.has-focused {
+    grid-template-columns: 1fr !important;
   }
 }
 
@@ -1065,18 +1094,39 @@ body {
   transition: transform 0.15s ease-out;
 }
 
-/* Pulsante Dimensione Scheda Camera */
-.btn-size-cam {
+/* Pulsante Focus / In Evidenza sulla Card */
+.btn-focus-cam {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 8px;
   font-family: var(--font);
-  font-size: 10px;
-  font-weight: 700;
+  font-size: 11px;
+  font-weight: 600;
   width: auto !important;
-  padding: 0 7px;
-  gap: 3px;
+  height: 32px;
+  border-radius: 7px;
+  background: rgba(0, 0, 0, 0.65);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  color: rgba(255, 255, 255, 0.85);
+  cursor: pointer;
+  transition: all var(--transition);
+  backdrop-filter: blur(8px);
 }
-.btn-size-cam .size-label {
+.btn-focus-cam svg {
+  width: 13px;
+  height: 13px;
+}
+.btn-focus-cam:hover {
+  background: rgba(0, 212, 255, 0.15);
+  border-color: var(--accent-cyan);
+  color: #fff;
+}
+.btn-focus-cam.active {
+  background: rgba(0, 212, 255, 0.25);
+  border-color: var(--accent-cyan);
   color: var(--accent-cyan);
-  letter-spacing: 0.5px;
+  box-shadow: 0 0 12px rgba(0, 212, 255, 0.35);
 }
 
 /* Pulsanti Sposta ◀ ▶ per riordinamento rapido */

@@ -59,11 +59,11 @@
         <span id="timelapseBtnText">Timelapse</span>
       </button>
 
-      <!-- Selettore Dimensione Griglia Globale -->
-      <div class="grid-size-selector" title="Dimensione schede sulla dashboard">
-        <button type="button" class="btn-grid-size" data-size="compact" title="Vista Compatta (S)">S</button>
-        <button type="button" class="btn-grid-size active" data-size="medium" title="Vista Media (M)">M</button>
-        <button type="button" class="btn-grid-size" data-size="large" title="Vista Ampia (L)">L</button>
+      <!-- Selettore Layout Griglia -->
+      <div class="grid-layout-selector" title="Disposizione telecamere sulla dashboard">
+        <button type="button" class="btn-layout-mode" data-layout="cols-3" title="3 Colonne (Affiancate in 1 riga)">3 Col</button>
+        <button type="button" class="btn-layout-mode" data-layout="cols-2" title="2 Colonne (Grandi)">2 Col</button>
+        <button type="button" class="btn-layout-mode" data-layout="cols-1" title="1 Colonna (Piena larghezza)">1 Col</button>
       </div>
 
 
@@ -138,15 +138,6 @@
               <option value="fill">Stira (Fill - Adatta a scheda)</option>
             </select>
           </div>
-        </div>
-
-        <div class="form-group">
-          <label for="camCardSize">Dimensione Scheda</label>
-          <select id="camCardSize">
-            <option value="1x">Normale (1x - 1 Colonna)</option>
-            <option value="2x">Grande (2x - 2 Colonne affiancate)</option>
-            <option value="full">Massima (Piena larghezza riga)</option>
-          </select>
         </div>
 
         <div class="modal-actions">

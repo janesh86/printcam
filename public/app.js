@@ -184,31 +184,26 @@ function initDashboard() {
 
   setupModalEvents();
 
-  // ── Selettore Dimensione Griglia Globale ───────────────────
+  // ── Selettore Layout Griglia (3 Col / 2 Col / 1 Col) ────────
   const dashboard = document.getElementById('dashboard');
-  const sizeButtons = document.querySelectorAll('.btn-grid-size');
-  const sizeMap = {
-    compact: '380px',
-    medium: '520px',
-    large: '720px'
-  };
+  const layoutButtons = document.querySelectorAll('.btn-layout-mode');
 
-  function setGridSize(sizeKey) {
-    const minWidth = sizeMap[sizeKey] || '520px';
-    if (dashboard) dashboard.style.setProperty('--grid-card-min', minWidth);
-    sizeButtons.forEach(btn => {
-      btn.classList.toggle('active', btn.getAttribute('data-size') === sizeKey);
+  function applyGridLayout(layoutKey) {
+    if (!dashboard) return;
+    dashboard.classList.remove('layout-cols-3', 'layout-cols-2', 'layout-cols-1');
+    dashboard.classList.add(`layout-${layoutKey}`);
+    layoutButtons.forEach(btn => {
+      btn.classList.toggle('active', btn.getAttribute('data-layout') === layoutKey);
     });
-    localStorage.setItem('printcam_grid_size', sizeKey);
+    localStorage.setItem('printcam_grid_layout', layoutKey);
   }
 
-  const savedGridSize = localStorage.getItem('printcam_grid_size') || 'medium';
-  setGridSize(savedGridSize);
+  const savedLayout = localStorage.getItem('printcam_grid_layout') || 'cols-3';
+  applyGridLayout(savedLayout);
 
-  sizeButtons.forEach(btn => {
+  layoutButtons.forEach(btn => {
     btn.addEventListener('click', () => {
-      const sizeKey = btn.getAttribute('data-size');
-      setGridSize(sizeKey);
+      applyGridLayout(btn.getAttribute('data-layout'));
     });
   });
 
@@ -263,10 +258,15 @@ function renderCameras(cameras) {
     return;
   }
 
+  const focusedCamId = localStorage.getItem('printcam_focused_cam');
+  if (dashboard) {
+    dashboard.classList.toggle('has-focused', !!focusedCamId);
+  }
+
   cameras.forEach((cam, idx) => {
     const card = document.createElement('section');
-    const cardSize = cam.cardSize || '1x';
-    card.className = `camera-card cam-${idx + 1} size-${cardSize}`;
+    const isFocused = (focusedCamId === cam.id);
+    card.className = `camera-card cam-${idx + 1}${isFocused ? ' camera-focused' : ''}`;
     card.id = `card-${cam.id}`;
     card.setAttribute('data-id', cam.id);
     card.setAttribute('aria-label', `Camera ${idx + 1} - ${cam.name}`);
@@ -282,8 +282,11 @@ function renderCameras(cameras) {
         <button class="btn-card-action btn-move-left" title="Sposta a sinistra" aria-label="Sposta indietro">◀</button>
         <button class="btn-card-action btn-move-right" title="Sposta a destra" aria-label="Sposta avanti">▶</button>
 
-        <button class="btn-card-action btn-size-cam" title="Cambia dimensione scheda (1x / 2x / Massima)" aria-label="Dimensione scheda">
-          <span class="size-label">${cardSize === 'full' ? 'MAX' : cardSize.toUpperCase()}</span>
+        <button class="btn-card-action btn-focus-cam ${isFocused ? 'active' : ''}" title="${isFocused ? 'Rimuovi da primo piano' : 'Metti in primo piano'}" aria-label="Metti in primo piano">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="${isFocused ? 'currentColor' : 'none'}" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon>
+          </svg>
+          <span class="focus-label">${isFocused ? 'In Primo Piano' : 'Focus'}</span>
         </button>
 
         <button class="btn-card-action drag-handle" title="Trascina per riordinare" aria-label="Riordina camera">
@@ -360,27 +363,18 @@ function renderCameras(cameras) {
 
     container.appendChild(card);
 
-    // Event listener Dimensione Scheda (1x / 2x / MAX)
-    const btnSize = card.querySelector('.btn-size-cam');
-    if (btnSize) {
-      btnSize.addEventListener('click', async (e) => {
+    // Event listener Focus / Primo Piano
+    const btnFocus = card.querySelector('.btn-focus-cam');
+    if (btnFocus) {
+      btnFocus.addEventListener('click', (e) => {
         e.stopPropagation();
-        const currentSize = cam.cardSize || '1x';
-        const nextSize = currentSize === '1x' ? '2x' : (currentSize === '2x' ? 'full' : '1x');
-        cam.cardSize = nextSize;
-        card.className = `camera-card cam-${idx + 1} size-${nextSize}`;
-        const label = card.querySelector('.btn-size-cam .size-label');
-        if (label) label.textContent = nextSize === 'full' ? 'MAX' : nextSize.toUpperCase();
-
-        try {
-          await fetch(`/api/cameras/${cam.id}`, {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ cardSize: nextSize })
-          });
-        } catch (err) {
-          console.error('Errore salvataggio dimensione card:', err);
+        const currentFocused = localStorage.getItem('printcam_focused_cam');
+        if (currentFocused === cam.id) {
+          localStorage.removeItem('printcam_focused_cam');
+        } else {
+          localStorage.setItem('printcam_focused_cam', cam.id);
         }
+        loadAndRenderCameras();
       });
     }
 
@@ -741,9 +735,8 @@ function setupModalEvents() {
     const url = document.getElementById('camUrl').value;
     const mode = document.getElementById('camMode').value;
     const fitMode = document.getElementById('camFitMode').value;
-    const cardSize = document.getElementById('camCardSize') ? document.getElementById('camCardSize').value : '1x';
 
-    const payload = { name, url, mode, fitMode, cardSize };
+    const payload = { name, url, mode, fitMode };
 
     try {
       let res;
@@ -805,9 +798,6 @@ function openCameraModal(cam = null) {
     document.getElementById('camUrl').value = cam.url;
     document.getElementById('camMode').value = cam.mode || 'ffmpeg-mjpeg';
     document.getElementById('camFitMode').value = cam.fitMode || 'contain';
-    if (document.getElementById('camCardSize')) {
-      document.getElementById('camCardSize').value = cam.cardSize || '1x';
-    }
     btnDelete.style.display = 'block';
   } else {
     title.textContent = 'Aggiungi Nuova Camera';
@@ -816,9 +806,6 @@ function openCameraModal(cam = null) {
     document.getElementById('camUrl').value = '';
     document.getElementById('camMode').value = 'ffmpeg-mjpeg';
     document.getElementById('camFitMode').value = 'contain';
-    if (document.getElementById('camCardSize')) {
-      document.getElementById('camCardSize').value = '1x';
-    }
     btnDelete.style.display = 'none';
   }
 
