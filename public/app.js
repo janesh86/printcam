@@ -184,18 +184,19 @@ function initDashboard() {
 
   setupModalEvents();
 
-  // ── Selettore Layout Griglia (3 Col / 2 Col / 1 Col) ────────
+  // ── Selettore Layout Griglia (3 Col / 2 Col / 1 Col / Split DX / Split SX) ──
   const dashboard = document.getElementById('dashboard');
   const layoutButtons = document.querySelectorAll('.btn-layout-mode');
 
   function applyGridLayout(layoutKey) {
     if (!dashboard) return;
-    dashboard.classList.remove('layout-cols-3', 'layout-cols-2', 'layout-cols-1');
+    dashboard.classList.remove('layout-cols-3', 'layout-cols-2', 'layout-cols-1', 'layout-split-right', 'layout-split-left');
     dashboard.classList.add(`layout-${layoutKey}`);
     layoutButtons.forEach(btn => {
       btn.classList.toggle('active', btn.getAttribute('data-layout') === layoutKey);
     });
     localStorage.setItem('printcam_grid_layout', layoutKey);
+    updateSplitLayoutClasses();
   }
 
   const savedLayout = localStorage.getItem('printcam_grid_layout') || 'cols-3';
@@ -223,6 +224,75 @@ function initDashboard() {
 }
 
 // ─── Caricamento e Rendering delle Camere ──────────────────────────────────────
+
+function updateSplitLayoutClasses() {
+  const dashboard = document.getElementById('dashboard');
+  if (!dashboard) return;
+  const cards = Array.from(dashboard.querySelectorAll('.camera-card'));
+  if (cards.length === 0) return;
+
+  const layout = localStorage.getItem('printcam_grid_layout') || 'cols-3';
+  const focusedCamId = localStorage.getItem('printcam_focused_cam');
+  const isSplit = (layout === 'split-right' || layout === 'split-left');
+
+  dashboard.classList.toggle('has-focused', !isSplit && !!focusedCamId);
+
+  if (isSplit) {
+    let mainCard = null;
+    if (focusedCamId) {
+      mainCard = cards.find(c => c.getAttribute('data-id') === focusedCamId);
+    }
+    if (!mainCard) {
+      // Default Split DX (Destra): seconda telecamera (CAM 2) o ultima
+      // Default Split SX (Sinistra): prima telecamera (CAM 1)
+      if (layout === 'split-right') {
+        mainCard = cards.length >= 2 ? cards[1] : cards[0];
+      } else {
+        mainCard = cards[0];
+      }
+    }
+
+    const sideCards = cards.filter(c => c !== mainCard);
+
+    cards.forEach(card => {
+      card.classList.remove('camera-focused', 'split-main', 'split-side-1', 'split-side-2');
+      const isMain = (card === mainCard);
+      if (isMain) {
+        card.classList.add('split-main');
+      } else if (sideCards[0] && card === sideCards[0]) {
+        card.classList.add('split-side-1');
+      } else if (sideCards[1] && card === sideCards[1]) {
+        card.classList.add('split-side-2');
+      }
+
+      const btnFocus = card.querySelector('.btn-focus-cam');
+      if (btnFocus) {
+        btnFocus.classList.toggle('active', isMain);
+        const label = btnFocus.querySelector('.focus-label');
+        if (label) label.textContent = isMain ? 'In Primo Piano' : 'Focus';
+        const svg = btnFocus.querySelector('svg');
+        if (svg) svg.setAttribute('fill', isMain ? 'currentColor' : 'none');
+        btnFocus.title = isMain ? 'Rimuovi da primo piano' : 'Metti in primo piano';
+      }
+    });
+  } else {
+    cards.forEach(card => {
+      card.classList.remove('split-main', 'split-side-1', 'split-side-2');
+      const isFocused = (card.getAttribute('data-id') === focusedCamId);
+      card.classList.toggle('camera-focused', isFocused);
+
+      const btnFocus = card.querySelector('.btn-focus-cam');
+      if (btnFocus) {
+        btnFocus.classList.toggle('active', isFocused);
+        const label = btnFocus.querySelector('.focus-label');
+        if (label) label.textContent = isFocused ? 'In Primo Piano' : 'Focus';
+        const svg = btnFocus.querySelector('svg');
+        if (svg) svg.setAttribute('fill', isFocused ? 'currentColor' : 'none');
+        btnFocus.title = isFocused ? 'Rimuovi da primo piano' : 'Metti in primo piano';
+      }
+    });
+  }
+}
 
 async function loadAndRenderCameras() {
   try {
@@ -265,8 +335,7 @@ function renderCameras(cameras) {
 
   cameras.forEach((cam, idx) => {
     const card = document.createElement('section');
-    const isFocused = (focusedCamId === cam.id);
-    card.className = `camera-card cam-${idx + 1}${isFocused ? ' camera-focused' : ''}`;
+    card.className = `camera-card cam-${idx + 1}`;
     card.id = `card-${cam.id}`;
     card.setAttribute('data-id', cam.id);
     card.setAttribute('aria-label', `Camera ${idx + 1} - ${cam.name}`);
@@ -282,11 +351,11 @@ function renderCameras(cameras) {
         <button class="btn-card-action btn-move-left" title="Sposta a sinistra" aria-label="Sposta indietro">◀</button>
         <button class="btn-card-action btn-move-right" title="Sposta a destra" aria-label="Sposta avanti">▶</button>
 
-        <button class="btn-card-action btn-focus-cam ${isFocused ? 'active' : ''}" title="${isFocused ? 'Rimuovi da primo piano' : 'Metti in primo piano'}" aria-label="Metti in primo piano">
-          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="${isFocused ? 'currentColor' : 'none'}" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <button class="btn-card-action btn-focus-cam" title="Metti in primo piano" aria-label="Metti in primo piano">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon>
           </svg>
-          <span class="focus-label">${isFocused ? 'In Primo Piano' : 'Focus'}</span>
+          <span class="focus-label">Focus</span>
         </button>
 
         <button class="btn-card-action drag-handle" title="Trascina per riordinare" aria-label="Riordina camera">
@@ -374,7 +443,7 @@ function renderCameras(cameras) {
         } else {
           localStorage.setItem('printcam_focused_cam', cam.id);
         }
-        loadAndRenderCameras();
+        updateSplitLayoutClasses();
       });
     }
 
@@ -385,6 +454,7 @@ function renderCameras(cameras) {
       if (prev && prev.classList.contains('camera-card')) {
         container.insertBefore(card, prev);
         updateBadgeNumbers();
+        updateSplitLayoutClasses();
         saveNewOrder();
       }
     });
@@ -396,6 +466,7 @@ function renderCameras(cameras) {
       if (next && next.classList.contains('camera-card')) {
         container.insertBefore(next, card);
         updateBadgeNumbers();
+        updateSplitLayoutClasses();
         saveNewOrder();
       }
     });
@@ -420,6 +491,7 @@ function renderCameras(cameras) {
   });
 
   setupDragAndDrop();
+  updateSplitLayoutClasses();
 }
 
 
@@ -934,6 +1006,7 @@ async function saveNewOrder() {
   const container = document.getElementById('dashboard');
   const cards = container.querySelectorAll('.camera-card');
   const order = Array.from(cards).map(card => card.getAttribute('data-id'));
+  updateSplitLayoutClasses();
 
   try {
     await fetch('/api/cameras/reorder', {

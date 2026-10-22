@@ -517,7 +517,7 @@ body {
 
 /* Modalità Griglia (Selezionabili nell'Header) */
 .cameras-grid.layout-cols-3,
-.cameras-grid:not([class*="layout-cols-"]) {
+.cameras-grid:not([class*="layout-"]) {
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
@@ -529,19 +529,68 @@ body {
   grid-template-columns: minmax(0, 1fr);
 }
 
-/* Modalità Camera in Primo Piano (Focus / In Evidenza) */
-.cameras-grid.has-focused {
+/* ── Modalità Split DX (2 Incolonnate a SX, 1 Grande a DX) ───── */
+.cameras-grid.layout-split-right {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 2fr);
+  grid-template-rows: repeat(2, minmax(0, 1fr));
+  grid-template-areas:
+    "side1 main"
+    "side2 main";
+  gap: 16px;
+  align-items: stretch;
+}
+
+/* ── Modalità Split SX (1 Grande a SX, 2 Incolonnate a DX) ───── */
+.cameras-grid.layout-split-left {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
+  grid-template-rows: repeat(2, minmax(0, 1fr));
+  grid-template-areas:
+    "main side1"
+    "main side2";
+  gap: 16px;
+  align-items: stretch;
+}
+
+.cameras-grid.layout-split-right .camera-card.split-main,
+.cameras-grid.layout-split-left .camera-card.split-main {
+  grid-area: main;
+  height: 100%;
+  border-color: rgba(0, 212, 255, 0.45);
+  box-shadow: 0 0 35px rgba(0, 212, 255, 0.2), 0 16px 48px rgba(0,0,0,0.6);
+}
+
+.cameras-grid.layout-split-right .camera-card.split-main .camera-feed,
+.cameras-grid.layout-split-left .camera-card.split-main .camera-feed {
+  height: 100%;
+  aspect-ratio: unset;
+  min-height: 280px;
+}
+
+.cameras-grid.layout-split-right .camera-card.split-side-1,
+.cameras-grid.layout-split-left .camera-card.split-side-1 {
+  grid-area: side1;
+}
+
+.cameras-grid.layout-split-right .camera-card.split-side-2,
+.cameras-grid.layout-split-left .camera-card.split-side-2 {
+  grid-area: side2;
+}
+
+/* Modalità Camera in Primo Piano per layout standard (Top Spotlight) */
+.cameras-grid.has-focused:not(.layout-split-right):not(.layout-split-left) {
   grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
 }
 
-.cameras-grid.has-focused .camera-card.camera-focused {
+.cameras-grid.has-focused:not(.layout-split-right):not(.layout-split-left) .camera-card.camera-focused {
   grid-column: 1 / -1 !important;
   order: -1 !important;
   border-color: rgba(0, 212, 255, 0.45);
   box-shadow: 0 0 35px rgba(0, 212, 255, 0.2), 0 16px 48px rgba(0,0,0,0.6);
 }
 
-.cameras-grid.has-focused .camera-card:not(.camera-focused) {
+.cameras-grid.has-focused:not(.layout-split-right):not(.layout-split-left) .camera-card:not(.camera-focused) {
   grid-column: span 1 !important;
   order: 0 !important;
 }
@@ -549,6 +598,29 @@ body {
 @media (max-width: 1100px) {
   .cameras-grid.layout-cols-3 {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 900px) {
+  .cameras-grid.layout-split-right,
+  .cameras-grid.layout-split-left {
+    grid-template-columns: 1fr !important;
+    grid-template-rows: auto !important;
+    grid-template-areas: none !important;
+  }
+  .cameras-grid.layout-split-right .camera-card.split-main,
+  .cameras-grid.layout-split-left .camera-card.split-main,
+  .cameras-grid.layout-split-right .camera-card.split-side-1,
+  .cameras-grid.layout-split-left .camera-card.split-side-1,
+  .cameras-grid.layout-split-right .camera-card.split-side-2,
+  .cameras-grid.layout-split-left .camera-card.split-side-2 {
+    grid-area: unset !important;
+    height: auto !important;
+  }
+  .cameras-grid.layout-split-right .camera-card.split-main .camera-feed,
+  .cameras-grid.layout-split-left .camera-card.split-main .camera-feed {
+    height: auto !important;
+    aspect-ratio: var(--feed-aspect, 16 / 9) !important;
   }
 }
 
