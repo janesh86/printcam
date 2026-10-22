@@ -297,12 +297,19 @@ function renderCameras(cameras) {
         <canvas id="canvas-${cam.id}" class="camera-canvas ${fitClass}" aria-hidden="true"></canvas>
 
         ${cam.fitMode === 'cover' ? `
-        <div class="camera-pan-pad" id="panpad-${cam.id}" title="Regola area inquadrata (Pan)">
-          <button class="btn-pan btn-pan-up" data-dir="up" title="Sposta in alto">▲</button>
-          <button class="btn-pan btn-pan-left" data-dir="left" title="Sposta a sinistra">◀</button>
-          <button class="btn-pan btn-pan-center" data-dir="center" title="Reimposta centro">🎯</button>
-          <button class="btn-pan btn-pan-right" data-dir="right" title="Sposta a destra">▶</button>
-          <button class="btn-pan btn-pan-down" data-dir="down" title="Sposta in basso">▼</button>
+        <div class="camera-pan-pad" id="panpad-${cam.id}" title="Regola inquadratura e zoom">
+          <div class="pan-dpad-grid">
+            <button class="btn-pan btn-pan-up" data-dir="up" title="Sposta in alto">▲</button>
+            <button class="btn-pan btn-pan-left" data-dir="left" title="Sposta a sinistra">◀</button>
+            <button class="btn-pan btn-pan-center" data-dir="center" title="Reimposta centro e zoom">🎯</button>
+            <button class="btn-pan btn-pan-right" data-dir="right" title="Sposta a destra">▶</button>
+            <button class="btn-pan btn-pan-down" data-dir="down" title="Sposta in basso">▼</button>
+          </div>
+          <div class="pan-zoom-row">
+            <button class="btn-pan btn-zoom-btn" data-action="zoom-out" title="Riduci ingrandimento (Zoom Out)">−</button>
+            <span class="zoom-level-text" title="Clicca per reimpostare 1.0x">${(typeof cam.zoom === 'number' ? cam.zoom : 1.0).toFixed(1)}x</span>
+            <button class="btn-pan btn-zoom-btn" data-action="zoom-in" title="Aumenta ingrandimento (Zoom In)">+</button>
+          </div>
         </div>
         ` : ''}
 
@@ -471,21 +478,21 @@ function setupCamera(id) {
   };
 }
 
-// ─── Controllo Pan / Area Inquadrata (Modalità Cover) ─────────────────────────
+// ─── Controllo Pan & Zoom (Modalità Cover) ───────────────────────────────────
 
 let panSaveTimers = {};
 
-function debouncedSavePan(id, panX, panY) {
+function debouncedSavePan(id, panX, panY, zoom) {
   clearTimeout(panSaveTimers[id]);
   panSaveTimers[id] = setTimeout(async () => {
     try {
       await fetch(`/api/cameras/${id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ panX, panY }),
+        body: JSON.stringify({ panX, panY, zoom }),
       });
     } catch (err) {
-      console.error('Errore salvataggio pan:', err);
+      console.error('Errore salvataggio pan e zoom:', err);
     }
   }, 400);
 }
@@ -495,42 +502,117 @@ function setupPanControl(cam, canvas, card) {
 
   let panX = typeof cam.panX === 'number' ? cam.panX : 50;
   let panY = typeof cam.panY === 'number' ? cam.panY : 50;
+  let zoom = typeof cam.zoom === 'number' ? cam.zoom : 1.0;
 
-  function applyPan() {
+  const panPad = card.querySelector('.camera-pan-pad');
+  const zoomText = panPad ? panPad.querySelector('.zoom-level-text') : null;
+
+  function applyPanAndZoom() {
     canvas.style.setProperty('--pan-x', `${panX}%`);
     canvas.style.setProperty('--pan-y', `${panY}%`);
-    debouncedSavePan(cam.id, panX, panY);
+    canvas.style.setProperty('--zoom', zoom);
+    if (zoomText) {
+      zoomText.textContent = `${zoom.toFixed(1)}x`;
+    }
+    cam.panX = panX;
+    cam.panY = panY;
+    cam.zoom = zoom;
+    debouncedSavePan(cam.id, panX, panY, zoom);
   }
 
-  // Applica coordinate iniziali
+  // Applica valori iniziali
   canvas.style.setProperty('--pan-x', `${panX}%`);
   canvas.style.setProperty('--pan-y', `${panY}%`);
+  canvas.style.setProperty('--zoom', zoom);
 
-  // Gestore D-Pad Overlay
-  const panPad = card.querySelector('.camera-pan-pad');
+  // Gestore D-Pad Overlay & Zoom Buttons
   if (panPad) {
     panPad.addEventListener('click', (e) => {
       e.stopPropagation();
-      const btn = e.target.closest('.btn-pan');
-      if (!btn) return;
-      const dir = btn.getAttribute('data-dir');
+
+      const textBtn = e.target.closest('.zoom-level-text');
+      if (textBtn) {
+        zoom = 1.0;
+        applyPanAndZoom();
+        return;
+      }
+
+      const panBtn = e.target.closest('.btn-pan');
+      if (!panBtn) return;
+
+      const dir = panBtn.getAttribute('data-dir');
+      const action = panBtn.getAttribute('data-action');
+
       if (dir === 'up') panY = Math.max(0, panY - 10);
       else if (dir === 'down') panY = Math.min(100, panY + 10);
       else if (dir === 'left') panX = Math.max(0, panX - 10);
       else if (dir === 'right') panX = Math.min(100, panX + 10);
-      else if (dir === 'center') { panX = 50; panY = 50; }
-      applyPan();
+      else if (dir === 'center') {
+        panX = 50;
+        panY = 50;
+        zoom = 1.0;
+      } else if (action === 'zoom-in') {
+        zoom = Math.min(3.0, Math.round((zoom + 0.1) * 10) / 10);
+      } else if (action === 'zoom-out') {
+        zoom = Math.max(0.5, Math.round((zoom - 0.1) * 10) / 10);
+      }
+
+      applyPanAndZoom();
     });
   }
 
-  // Touch & Mouse Drag-to-Pan sul video
+  // Zoom tramite rotellina del mouse e Touch & Drag-to-Pan sul video
   if (cam.fitMode === 'cover') {
+    // Zoom tramite mouse wheel
+    canvas.addEventListener('wheel', (e) => {
+      e.preventDefault();
+      if (e.deltaY < 0) {
+        zoom = Math.min(3.0, Math.round((zoom + 0.1) * 10) / 10);
+      } else {
+        zoom = Math.max(0.5, Math.round((zoom - 0.1) * 10) / 10);
+      }
+      applyPanAndZoom();
+    }, { passive: false });
+
+    // Supporto Pinch-to-zoom touch per smartphone
+    let pinchStartDist = null;
+    let pinchStartZoom = 1.0;
+
+    canvas.addEventListener('touchstart', (e) => {
+      if (e.touches.length === 2) {
+        pinchStartDist = Math.hypot(
+          e.touches[0].clientX - e.touches[1].clientX,
+          e.touches[0].clientY - e.touches[1].clientY
+        );
+        pinchStartZoom = zoom;
+      }
+    }, { passive: true });
+
+    canvas.addEventListener('touchmove', (e) => {
+      if (e.touches.length === 2 && pinchStartDist) {
+        const currentDist = Math.hypot(
+          e.touches[0].clientX - e.touches[1].clientX,
+          e.touches[0].clientY - e.touches[1].clientY
+        );
+        const factor = currentDist / pinchStartDist;
+        zoom = Math.max(0.5, Math.min(3.0, Math.round(pinchStartZoom * factor * 10) / 10));
+        applyPanAndZoom();
+      }
+    }, { passive: true });
+
+    canvas.addEventListener('touchend', (e) => {
+      if (e.touches.length < 2) {
+        pinchStartDist = null;
+      }
+    }, { passive: true });
+
+    // Touch & Mouse Drag-to-Pan sul video
     let isPanning = false;
     let lastX = 0;
     let lastY = 0;
 
     canvas.addEventListener('pointerdown', (e) => {
-      if (isReorderMode) return;
+      if (isReorderMode || e.pointerType === 'touch' && e.isPrimary === false) return;
       isPanning = true;
       lastX = e.clientX;
       lastY = e.clientY;
@@ -547,7 +629,7 @@ function setupPanControl(cam, canvas, card) {
       // Pan naturale (trascinamento video)
       panX = Math.max(0, Math.min(100, panX - Math.round(dx / 3)));
       panY = Math.max(0, Math.min(100, panY - Math.round(dy / 3)));
-      applyPan();
+      applyPanAndZoom();
     });
 
     const endPan = (e) => {
@@ -1141,7 +1223,7 @@ function openTimelapseModal() {
     item.className = 'tl-cam-item';
 
     const fitLabel = cam.fitMode === 'cover'
-      ? `Cover (Pan ${cam.panX || 50}%, ${cam.panY || 50}%)`
+      ? `Cover (Pan ${cam.panX || 50}%, ${cam.panY || 50}%, Zoom ${(typeof cam.zoom === 'number' ? cam.zoom : 1.0).toFixed(1)}x)`
       : (cam.fitMode === 'fill' ? 'Stira (Fill)' : 'Contieni (Contain)');
 
     item.innerHTML = `

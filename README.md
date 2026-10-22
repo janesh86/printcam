@@ -20,7 +20,7 @@ Progettata specificamente per l'hosting leggero su **Synology NAS** (via Contain
   - **Contieni (Contain)**: Mantiene le proporzioni native del video.
   - **Stira (Fill)**: Adatta l'immagine all'intera scheda.
   - **Riempi (Cover)**: Rimuove le barre nere con zoom dinamico.
-- 🎯 **D-Pad Pan & Drag-to-Pan**: In modalità *Cover*, regola l'area inquadrata usando il D-Pad direzionale (▲ ◀ 🎯 ▶ ▼) o trascinando direttamente il video con il dito.
+- 🎯 **D-Pad Pan & Zoom In/Out**: In modalità *Cover*, regola l'area inquadrata e l'ingrandimento usando il D-Pad (▲ ◀ 🎯 ▶ ▼, Zoom − / +), la rotellina del mouse o il pinch-to-zoom da smartphone. Permette di effettuare sia lo zoom-in per vedere i dettagli dell'estrusore, sia lo zoom-out per mostrare una porzione più ampia della scena.
 - 🎬 **Timelapse Combinato Multi-Prospettiva**: Registra timelapse sincronizzati su richiesta selezionando l'intervallo di scatto (es. ogni 5s, 10s, 30s) e framerate (30fps, 60fps). FFmpeg compila automaticamente un unico video panoramico (`.mp4`) che unisce i flussi affiancati, rispettando fedelmente l'ordine della dashboard, il fit (`cover`/`contain`/`fill`) e il pan/inquadratura scelto per ciascuna telecamera!
 - 📺 **Player Video & Download Integrato**: Guarda le registrazioni direttamente dal browser con streaming HTML5 istantaneo o scaricale sul tuo dispositivo.
 - ⏰ **Stop Schedulato ad un Orario**: Imposta un'ora precisa (es. `18:30` o con pulsanti rapidi `+1h`, `+2h`, `+4h`) per fermare automaticamente il timelapse. Il calcolo temporale locale assicura precisione assoluta a prescindere dal fuso orario del container.
