@@ -399,9 +399,12 @@ function setupCamera(id) {
     if (drawTimer) return;
     drawTimer = setInterval(() => {
       if (img.naturalWidth > 0 && img.naturalHeight > 0) {
-        if (canvas.width !== img.naturalWidth) {
+        if (canvas.width !== img.naturalWidth || canvas.height !== img.naturalHeight) {
           canvas.width  = img.naturalWidth;
           canvas.height = img.naturalHeight;
+          if (canvas.parentElement) {
+            canvas.parentElement.style.setProperty('--feed-aspect', `${img.naturalWidth} / ${img.naturalHeight}`);
+          }
         }
         try {
           ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
@@ -437,6 +440,9 @@ function setupCamera(id) {
     loadingEl.classList.add('hidden');
     errorEl.classList.remove('visible');
     liveBadge.classList.remove('offline');
+    if (img.naturalWidth > 0 && img.naturalHeight > 0 && canvas.parentElement) {
+      canvas.parentElement.style.setProperty('--feed-aspect', `${img.naturalWidth} / ${img.naturalHeight}`);
+    }
     startDrawing();
   };
 
