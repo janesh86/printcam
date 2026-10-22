@@ -184,6 +184,34 @@ function initDashboard() {
 
   setupModalEvents();
 
+  // ── Selettore Dimensione Griglia Globale ───────────────────
+  const dashboard = document.getElementById('dashboard');
+  const sizeButtons = document.querySelectorAll('.btn-grid-size');
+  const sizeMap = {
+    compact: '380px',
+    medium: '520px',
+    large: '720px'
+  };
+
+  function setGridSize(sizeKey) {
+    const minWidth = sizeMap[sizeKey] || '520px';
+    if (dashboard) dashboard.style.setProperty('--grid-card-min', minWidth);
+    sizeButtons.forEach(btn => {
+      btn.classList.toggle('active', btn.getAttribute('data-size') === sizeKey);
+    });
+    localStorage.setItem('printcam_grid_size', sizeKey);
+  }
+
+  const savedGridSize = localStorage.getItem('printcam_grid_size') || 'medium';
+  setGridSize(savedGridSize);
+
+  sizeButtons.forEach(btn => {
+    btn.addEventListener('click', () => {
+      const sizeKey = btn.getAttribute('data-size');
+      setGridSize(sizeKey);
+    });
+  });
+
   // ── Timelapse UI ───────────────────────────────────────────
   initTimelapseUI();
 
@@ -237,7 +265,8 @@ function renderCameras(cameras) {
 
   cameras.forEach((cam, idx) => {
     const card = document.createElement('section');
-    card.className = `camera-card cam-${idx + 1}`;
+    const cardSize = cam.cardSize || '1x';
+    card.className = `camera-card cam-${idx + 1} size-${cardSize}`;
     card.id = `card-${cam.id}`;
     card.setAttribute('data-id', cam.id);
     card.setAttribute('aria-label', `Camera ${idx + 1} - ${cam.name}`);
@@ -252,6 +281,10 @@ function renderCameras(cameras) {
       <div class="card-controls">
         <button class="btn-card-action btn-move-left" title="Sposta a sinistra" aria-label="Sposta indietro">◀</button>
         <button class="btn-card-action btn-move-right" title="Sposta a destra" aria-label="Sposta avanti">▶</button>
+
+        <button class="btn-card-action btn-size-cam" title="Cambia dimensione scheda (1x / 2x / Massima)" aria-label="Dimensione scheda">
+          <span class="size-label">${cardSize === 'full' ? 'MAX' : cardSize.toUpperCase()}</span>
+        </button>
 
         <button class="btn-card-action drag-handle" title="Trascina per riordinare" aria-label="Riordina camera">
           <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -296,7 +329,6 @@ function renderCameras(cameras) {
         <img id="img-${cam.id}" class="camera-img" alt="${cam.name}" draggable="false" />
         <canvas id="canvas-${cam.id}" class="camera-canvas ${fitClass}" aria-hidden="true"></canvas>
 
-        ${cam.fitMode === 'cover' ? `
         <div class="camera-pan-pad" id="panpad-${cam.id}" title="Regola inquadratura e zoom">
           <div class="pan-dpad-grid">
             <button class="btn-pan btn-pan-up" data-dir="up" title="Sposta in alto">▲</button>
@@ -311,7 +343,6 @@ function renderCameras(cameras) {
             <button class="btn-pan btn-zoom-btn btn-zoom-in" data-action="zoom-in" title="Aumenta ingrandimento (Zoom In)" ${(typeof cam.zoom === 'number' && cam.zoom >= 3.0) ? 'disabled' : ''}>+</button>
           </div>
         </div>
-        ` : ''}
 
       </div>
 
@@ -328,6 +359,30 @@ function renderCameras(cameras) {
     `;
 
     container.appendChild(card);
+
+    // Event listener Dimensione Scheda (1x / 2x / MAX)
+    const btnSize = card.querySelector('.btn-size-cam');
+    if (btnSize) {
+      btnSize.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        const currentSize = cam.cardSize || '1x';
+        const nextSize = currentSize === '1x' ? '2x' : (currentSize === '2x' ? 'full' : '1x');
+        cam.cardSize = nextSize;
+        card.className = `camera-card cam-${idx + 1} size-${nextSize}`;
+        const label = card.querySelector('.btn-size-cam .size-label');
+        if (label) label.textContent = nextSize === 'full' ? 'MAX' : nextSize.toUpperCase();
+
+        try {
+          await fetch(`/api/cameras/${cam.id}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ cardSize: nextSize })
+          });
+        } catch (err) {
+          console.error('Errore salvataggio dimensione card:', err);
+        }
+      });
+    }
 
     // Event listener Sposta a sinistra ◀
     card.querySelector('.btn-move-left').addEventListener('click', (e) => {
@@ -582,85 +637,83 @@ function setupPanControl(cam, canvas, card) {
   }
 
   // Zoom tramite rotellina del mouse e Touch & Drag-to-Pan sul video
-  if (cam.fitMode === 'cover') {
-    // Zoom tramite mouse wheel
-    canvas.addEventListener('wheel', (e) => {
-      e.preventDefault();
-      if (e.deltaY < 0) {
-        zoom = Math.min(3.0, Math.round((zoom + 0.1) * 10) / 10);
-      } else {
-        zoom = Math.max(1.0, Math.round((zoom - 0.1) * 10) / 10);
-      }
+  // Zoom tramite mouse wheel
+  canvas.addEventListener('wheel', (e) => {
+    e.preventDefault();
+    if (e.deltaY < 0) {
+      zoom = Math.min(3.0, Math.round((zoom + 0.1) * 10) / 10);
+    } else {
+      zoom = Math.max(1.0, Math.round((zoom - 0.1) * 10) / 10);
+    }
+    applyPanAndZoom();
+  }, { passive: false });
+
+  // Supporto Pinch-to-zoom touch per smartphone
+  let pinchStartDist = null;
+  let pinchStartZoom = 1.0;
+
+  canvas.addEventListener('touchstart', (e) => {
+    if (e.touches.length === 2) {
+      pinchStartDist = Math.hypot(
+        e.touches[0].clientX - e.touches[1].clientX,
+        e.touches[0].clientY - e.touches[1].clientY
+      );
+      pinchStartZoom = zoom;
+    }
+  }, { passive: true });
+
+  canvas.addEventListener('touchmove', (e) => {
+    if (e.touches.length === 2 && pinchStartDist) {
+      const currentDist = Math.hypot(
+        e.touches[0].clientX - e.touches[1].clientX,
+        e.touches[0].clientY - e.touches[1].clientY
+      );
+      const factor = currentDist / pinchStartDist;
+      zoom = Math.max(1.0, Math.min(3.0, Math.round(pinchStartZoom * factor * 10) / 10));
       applyPanAndZoom();
-    }, { passive: false });
+    }
+  }, { passive: true });
 
-    // Supporto Pinch-to-zoom touch per smartphone
-    let pinchStartDist = null;
-    let pinchStartZoom = 1.0;
+  canvas.addEventListener('touchend', (e) => {
+    if (e.touches.length < 2) {
+      pinchStartDist = null;
+    }
+  }, { passive: true });
 
-    canvas.addEventListener('touchstart', (e) => {
-      if (e.touches.length === 2) {
-        pinchStartDist = Math.hypot(
-          e.touches[0].clientX - e.touches[1].clientX,
-          e.touches[0].clientY - e.touches[1].clientY
-        );
-        pinchStartZoom = zoom;
-      }
-    }, { passive: true });
+  // Touch & Mouse Drag-to-Pan sul video
+  let isPanning = false;
+  let lastX = 0;
+  let lastY = 0;
 
-    canvas.addEventListener('touchmove', (e) => {
-      if (e.touches.length === 2 && pinchStartDist) {
-        const currentDist = Math.hypot(
-          e.touches[0].clientX - e.touches[1].clientX,
-          e.touches[0].clientY - e.touches[1].clientY
-        );
-        const factor = currentDist / pinchStartDist;
-        zoom = Math.max(1.0, Math.min(3.0, Math.round(pinchStartZoom * factor * 10) / 10));
-        applyPanAndZoom();
-      }
-    }, { passive: true });
+  canvas.addEventListener('pointerdown', (e) => {
+    if (isReorderMode || e.pointerType === 'touch' && e.isPrimary === false) return;
+    isPanning = true;
+    lastX = e.clientX;
+    lastY = e.clientY;
+    try { canvas.setPointerCapture(e.pointerId); } catch (_) {}
+  });
 
-    canvas.addEventListener('touchend', (e) => {
-      if (e.touches.length < 2) {
-        pinchStartDist = null;
-      }
-    }, { passive: true });
+  canvas.addEventListener('pointermove', (e) => {
+    if (!isPanning) return;
+    const dx = e.clientX - lastX;
+    const dy = e.clientY - lastY;
+    lastX = e.clientX;
+    lastY = e.clientY;
 
-    // Touch & Mouse Drag-to-Pan sul video
-    let isPanning = false;
-    let lastX = 0;
-    let lastY = 0;
+    // Pan naturale (trascinamento video)
+    panX = Math.max(0, Math.min(100, panX - Math.round(dx / 3)));
+    panY = Math.max(0, Math.min(100, panY - Math.round(dy / 3)));
+    applyPanAndZoom();
+  });
 
-    canvas.addEventListener('pointerdown', (e) => {
-      if (isReorderMode || e.pointerType === 'touch' && e.isPrimary === false) return;
-      isPanning = true;
-      lastX = e.clientX;
-      lastY = e.clientY;
-      try { canvas.setPointerCapture(e.pointerId); } catch (_) {}
-    });
+  const endPan = (e) => {
+    if (!isPanning) return;
+    isPanning = false;
+    try { canvas.releasePointerCapture(e.pointerId); } catch (_) {}
+  };
 
-    canvas.addEventListener('pointermove', (e) => {
-      if (!isPanning) return;
-      const dx = e.clientX - lastX;
-      const dy = e.clientY - lastY;
-      lastX = e.clientX;
-      lastY = e.clientY;
-
-      // Pan naturale (trascinamento video)
-      panX = Math.max(0, Math.min(100, panX - Math.round(dx / 3)));
-      panY = Math.max(0, Math.min(100, panY - Math.round(dy / 3)));
-      applyPanAndZoom();
-    });
-
-    const endPan = (e) => {
-      if (!isPanning) return;
-      isPanning = false;
-      try { canvas.releasePointerCapture(e.pointerId); } catch (_) {}
-    };
-
-    canvas.addEventListener('pointerup', endPan);
-    canvas.addEventListener('pointercancel', endPan);
-  }
+  canvas.addEventListener('pointerup', endPan);
+  canvas.addEventListener('pointercancel', endPan);
 }
 
 // ─── Gestione Modal Aggiungi / Modifica Camera ───────────────────────────────
@@ -688,8 +741,9 @@ function setupModalEvents() {
     const url = document.getElementById('camUrl').value;
     const mode = document.getElementById('camMode').value;
     const fitMode = document.getElementById('camFitMode').value;
+    const cardSize = document.getElementById('camCardSize') ? document.getElementById('camCardSize').value : '1x';
 
-    const payload = { name, url, mode, fitMode };
+    const payload = { name, url, mode, fitMode, cardSize };
 
     try {
       let res;
@@ -751,6 +805,9 @@ function openCameraModal(cam = null) {
     document.getElementById('camUrl').value = cam.url;
     document.getElementById('camMode').value = cam.mode || 'ffmpeg-mjpeg';
     document.getElementById('camFitMode').value = cam.fitMode || 'contain';
+    if (document.getElementById('camCardSize')) {
+      document.getElementById('camCardSize').value = cam.cardSize || '1x';
+    }
     btnDelete.style.display = 'block';
   } else {
     title.textContent = 'Aggiungi Nuova Camera';
@@ -759,6 +816,9 @@ function openCameraModal(cam = null) {
     document.getElementById('camUrl').value = '';
     document.getElementById('camMode').value = 'ffmpeg-mjpeg';
     document.getElementById('camFitMode').value = 'contain';
+    if (document.getElementById('camCardSize')) {
+      document.getElementById('camCardSize').value = '1x';
+    }
     btnDelete.style.display = 'none';
   }
 

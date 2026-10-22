@@ -445,6 +445,41 @@ body {
 .status-dot.online  { background: var(--live-color); box-shadow: 0 0 8px rgba(34, 197, 94, 0.6); }
 .status-dot.offline { background: var(--offline-color); }
 
+/* Selettore Dimensione Griglia Globale */
+.grid-size-selector {
+  display: flex;
+  align-items: center;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--glass-border);
+  border-radius: 8px;
+  padding: 2px;
+  gap: 2px;
+}
+
+.btn-grid-size {
+  background: transparent;
+  border: none;
+  color: var(--text-secondary);
+  font-family: var(--font);
+  font-size: 11px;
+  font-weight: 700;
+  padding: 4px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all var(--transition);
+}
+
+.btn-grid-size:hover {
+  color: #fff;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.btn-grid-size.active {
+  background: var(--accent-cyan);
+  color: #000;
+  box-shadow: 0 0 10px rgba(0, 212, 255, 0.4);
+}
+
 .btn-logout {
   display: flex;
   align-items: center;
@@ -472,13 +507,30 @@ body {
 .cameras-grid {
   flex: 1;
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(380px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(var(--grid-card-min, 500px), 1fr));
   align-items: start;
   gap: 20px;
   padding: 20px 24px 24px;
   max-width: 1800px;
   margin: 0 auto;
   width: 100%;
+}
+
+/* ── Dimensioni Schede Singole ───────────────────────────────── */
+.camera-card.size-1x {
+  grid-column: span 1;
+}
+.camera-card.size-2x {
+  grid-column: span 2;
+}
+.camera-card.size-full {
+  grid-column: 1 / -1;
+}
+
+@media (max-width: 900px) {
+  .camera-card.size-2x {
+    grid-column: span 1;
+  }
 }
 
 /* ── Camera card ─────────────────────────────────────────────── */
@@ -867,14 +919,7 @@ body {
 .camera-canvas {
   display: block;
 }
-.camera-canvas.fit-contain {
-  position: absolute;
-  top: 50%; left: 50%;
-  transform: translate(-50%, -50%);
-  max-width: 100%; max-height: 100%;
-  width: 100%; height: 100%;
-  object-fit: contain;
-}
+.camera-canvas.fit-contain,
 .camera-canvas.fit-cover {
   position: absolute;
   top: 50%; left: 50%;
@@ -886,12 +931,19 @@ body {
   width: 100%; height: 100%;
   min-width: 100%; min-height: 100%;
   max-width: none; max-height: none;
-  object-fit: cover;
-  object-position: var(--pan-x, 50%) var(--pan-y, 50%);
   cursor: grab;
   transition: transform 0.15s ease-out;
 }
-.camera-canvas.fit-cover:active {
+.camera-canvas.fit-contain {
+  object-fit: contain;
+}
+.camera-canvas.fit-cover {
+  object-fit: cover;
+  object-position: var(--pan-x, 50%) var(--pan-y, 50%);
+}
+.camera-canvas.fit-cover:active,
+.camera-canvas.fit-contain:active,
+.camera-canvas.fit-fill:active {
   cursor: grabbing;
   transition: none;
 }
@@ -1000,11 +1052,31 @@ body {
 
 .camera-canvas.fit-fill {
   position: absolute;
-  top: 0; left: 0;
+  top: 50%; left: 50%;
+  transform: translate(
+    calc(-50% + (50% - var(--pan-x, 50%)) * (var(--zoom, 1) - 1)),
+    calc(-50% + (50% - var(--pan-y, 50%)) * (var(--zoom, 1) - 1))
+  ) scale(var(--zoom, 1));
+  transform-origin: center center;
   width: 100%; height: 100%;
   max-width: none; max-height: none;
-  transform: none;
   object-fit: fill;
+  cursor: grab;
+  transition: transform 0.15s ease-out;
+}
+
+/* Pulsante Dimensione Scheda Camera */
+.btn-size-cam {
+  font-family: var(--font);
+  font-size: 10px;
+  font-weight: 700;
+  width: auto !important;
+  padding: 0 7px;
+  gap: 3px;
+}
+.btn-size-cam .size-label {
+  color: var(--accent-cyan);
+  letter-spacing: 0.5px;
 }
 
 /* Pulsanti Sposta ◀ ▶ per riordinamento rapido */

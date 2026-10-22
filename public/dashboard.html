@@ -59,6 +59,13 @@
         <span id="timelapseBtnText">Timelapse</span>
       </button>
 
+      <!-- Selettore Dimensione Griglia Globale -->
+      <div class="grid-size-selector" title="Dimensione schede sulla dashboard">
+        <button type="button" class="btn-grid-size" data-size="compact" title="Vista Compatta (S)">S</button>
+        <button type="button" class="btn-grid-size active" data-size="medium" title="Vista Media (M)">M</button>
+        <button type="button" class="btn-grid-size" data-size="large" title="Vista Ampia (L)">L</button>
+      </div>
+
 
       <!-- Stato go2rtc -->
       <div class="server-status" id="serverStatus" title="Stato server go2rtc">
@@ -131,6 +138,15 @@
               <option value="fill">Stira (Fill - Adatta a scheda)</option>
             </select>
           </div>
+        </div>
+
+        <div class="form-group">
+          <label for="camCardSize">Dimensione Scheda</label>
+          <select id="camCardSize">
+            <option value="1x">Normale (1x - 1 Colonna)</option>
+            <option value="2x">Grande (2x - 2 Colonne affiancate)</option>
+            <option value="full">Massima (Piena larghezza riga)</option>
+          </select>
         </div>
 
         <div class="modal-actions">

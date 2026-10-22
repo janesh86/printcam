@@ -229,7 +229,7 @@ app.get('/api/cameras', requireAuth, (req, res) => {
 
 // POST /api/cameras - Crea nuova fotocamera
 app.post('/api/cameras', requireAuth, (req, res) => {
-  const { name, url, mode, fitMode, panX, panY, zoom } = req.body;
+  const { name, url, mode, fitMode, panX, panY, zoom, cardSize } = req.body;
   if (!name || !url) {
     return res.status(400).json({ success: false, message: 'Nome e URL sono obbligatori' });
   }
@@ -245,6 +245,7 @@ app.post('/api/cameras', requireAuth, (req, res) => {
     panX: typeof panX === 'number' ? panX : 50,
     panY: typeof panY === 'number' ? panY : 50,
     zoom: typeof zoom === 'number' ? Math.max(1.0, Math.min(3.0, zoom)) : 1.0,
+    cardSize: ['1x', '2x', 'full'].includes(cardSize) ? cardSize : '1x',
     order: cameras.length + 1
   };
 
@@ -258,7 +259,7 @@ app.post('/api/cameras', requireAuth, (req, res) => {
 // PUT /api/cameras/:id - Modifica fotocamera
 app.put('/api/cameras/:id', requireAuth, (req, res) => {
   const { id } = req.params;
-  const { name, url, mode, fitMode, panX, panY, zoom } = req.body;
+  const { name, url, mode, fitMode, panX, panY, zoom, cardSize } = req.body;
 
   const cameras = loadCameras();
   const idx = cameras.findIndex(c => c.id === id);
@@ -276,12 +277,14 @@ app.put('/api/cameras/:id', requireAuth, (req, res) => {
     const z = typeof zoom === 'number' ? zoom : parseFloat(zoom);
     cameras[idx].zoom = isNaN(z) ? 1.0 : Math.max(1.0, Math.min(3.0, Math.round(z * 10) / 10));
   }
+  if (cardSize !== undefined) {
+    cameras[idx].cardSize = ['1x', '2x', 'full'].includes(cardSize) ? cardSize : '1x';
+  }
 
   saveCameras(cameras);
   syncCameraToGo2Rtc(cameras[idx]);
 
   res.json({ success: true, camera: cameras[idx] });
-
 });
 
 // DELETE /api/cameras/:id - Rimuove fotocamera

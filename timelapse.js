@@ -101,7 +101,14 @@ function fetchSnapshot(go2rtcUrl, camId) {
       }
       const chunks = [];
       res.on('data', chunk => chunks.push(chunk));
-      res.on('end', () => resolve(Buffer.concat(chunks)));
+      res.on('end', () => {
+        const buf = Buffer.concat(chunks);
+        // Un frame JPEG valido deve avere una dimensione minima (almeno 500 byte)
+        if (!buf || buf.length < 500) {
+          return resolve(null);
+        }
+        resolve(buf);
+      });
     });
     req.on('error', () => resolve(null));
     req.on('timeout', () => { req.destroy(); resolve(null); });
@@ -183,12 +190,14 @@ async function captureFrameTick(go2rtcUrl) {
 
     if (buf && buf.length > 500) {
       lastGoodFrames[cam.id] = buf;
-    } else if (prevBuf) {
+    } else if (prevBuf && prevBuf.length > 500) {
       // Se il frame attuale è fallito, usa l'ultimo buono
       buf = prevBuf;
+    } else {
+      buf = null;
     }
 
-    if (buf) {
+    if (buf && buf.length > 500) {
       try {
         fs.writeFileSync(destPath, buf);
       } catch (err) {
@@ -434,14 +443,70 @@ function compileTimelapseVideo({ sessionId, cameras, fps, frameCount, startedAt,
     const outputFilename = `${sessionId}.mp4`;
     const outputPath = path.join(VIDEOS_DIR, outputFilename);
 
-    // Filtra solo le telecamere che hanno effettivamente fotogrammi validi su disco
-    const validCameras = cameras.filter(cam => {
-      const firstFrame = path.join(sessionDir, cam.id, 'frame_000001.jpg');
-      return fs.existsSync(firstFrame);
-    });
+    // 1. Filtra solo le telecamere che hanno effettivamente fotogrammi validi (> 500 byte)
+    const validCameras = [];
+
+    for (const cam of cameras) {
+      const camDir = path.join(sessionDir, cam.id);
+      if (!fs.existsSync(camDir)) continue;
+
+      let hasValidFrame = false;
+      try {
+        const files = fs.readdirSync(camDir).filter(f => f.startsWith('frame_') && f.endsWith('.jpg'));
+        for (const f of files) {
+          if (fs.statSync(path.join(camDir, f)).size > 500) {
+            hasValidFrame = true;
+            break;
+          }
+        }
+      } catch (_) {}
+
+      if (hasValidFrame) {
+        validCameras.push(cam);
+      } else {
+        console.warn(`[TIMELAPSE] Camera "${cam.name}" (${cam.id}) offline per l'intera sessione (0 byte): esclusa dal video finale.`);
+      }
+    }
 
     if (validCameras.length === 0) {
-      return reject(new Error('Nessuna telecamera attiva ha prodotto frame validi'));
+      return reject(new Error('Nessuna telecamera attiva ha prodotto frame validi per il timelapse'));
+    }
+
+    // 2. Garantisci sequenza continua senza buchi (1..frameCount) per tutte le camere valide
+    for (const cam of validCameras) {
+      const camDir = path.join(sessionDir, cam.id);
+      let firstGoodPath = null;
+
+      for (let idx = 1; idx <= frameCount; idx++) {
+        const p = path.join(camDir, `frame_${String(idx).padStart(6, '0')}.jpg`);
+        try {
+          if (fs.existsSync(p) && fs.statSync(p).size > 500) {
+            firstGoodPath = p;
+            break;
+          }
+        } catch (_) {}
+      }
+
+      if (!firstGoodPath) continue;
+
+      let currentGood = firstGoodPath;
+      for (let idx = 1; idx <= frameCount; idx++) {
+        const p = path.join(camDir, `frame_${String(idx).padStart(6, '0')}.jpg`);
+        let isValid = false;
+        try {
+          isValid = fs.existsSync(p) && fs.statSync(p).size > 500;
+        } catch (_) {}
+
+        if (isValid) {
+          currentGood = p;
+        } else {
+          try {
+            fs.copyFileSync(currentGood, p);
+          } catch (err) {
+            console.error(`[TIMELAPSE] Errore copia frame riempitivo ${idx} per ${cam.id}:`, err.message);
+          }
+        }
+      }
     }
 
     const N = validCameras.length;
@@ -526,13 +591,16 @@ function compileTimelapseVideo({ sessionId, cameras, fps, frameCount, startedAt,
           fileSizeMB = (stats.size / (1024 * 1024)).toFixed(1);
         } catch (_) {}
 
-        // Genera thumbnail (frame 1 della prima camera o screenshot)
+        // Genera thumbnail (frame 1 della prima telecamera valida)
         const thumbFilename = `${sessionId}.jpg`;
         const thumbPath = path.join(VIDEOS_DIR, thumbFilename);
         try {
-          const firstCamFirstFrame = path.join(sessionDir, cameras[0].id, 'frame_000001.jpg');
-          if (fs.existsSync(firstCamFirstFrame)) {
-            fs.copyFileSync(firstCamFirstFrame, thumbPath);
+          const firstValidCam = validCameras[0];
+          if (firstValidCam) {
+            const firstFrame = path.join(sessionDir, firstValidCam.id, 'frame_000001.jpg');
+            if (fs.existsSync(firstFrame) && fs.statSync(firstFrame).size > 500) {
+              fs.copyFileSync(firstFrame, thumbPath);
+            }
           }
         } catch (_) {}
 
